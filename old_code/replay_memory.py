@@ -1,9 +1,5 @@
-from collections import namedtuple
-
 import random
-import gym
-import vizdoomgym
-
+from collections import namedtuple
 
 Transition = namedtuple("Transition", ("state", "action", "next_state", "reward"))
 
@@ -30,35 +26,3 @@ class ReplayMemory(object):
 
     def __len__(self):
         return len(self.memory)
-
-
-def trivial():
-    # make deathmatch env
-    env = gym.make("VizdoomDeathmatch-v0")
-    env.reset()
-
-    print("Available actions: {}".format(env.action_space))
-
-    # for 1000 timesteps
-    for _ in range(1000):
-        env.render()
-        action = env.action_space.sample()
-
-        # observation is screen info we want
-        observation, reward, done, info = env.step(action)
-
-        if done:
-            observation = env.reset()
-
-    env.close()
-
-
-def main():
-    """
-    Running the program.
-    """
-    trivial()
-
-
-if __name__ == "__main__":
-    main()

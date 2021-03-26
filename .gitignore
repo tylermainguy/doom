@@ -1,3 +1,5 @@
 .vscode/
 scenarios
+_vizdoom.ini
+__pycache__/
 
