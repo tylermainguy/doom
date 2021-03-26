@@ -4,8 +4,8 @@ from collections import namedtuple
 Transition = namedtuple("Transition", ("state", "action", "next_state", "reward"))
 
 
-class ReplayMemory(object):
-    """Store replay memory for DQN."""
+class ReplayBuffer(object):
+    """Store replay buffer for DQN."""
 
     def __init__(self, capacity):
         self.capacity = capacity
