@@ -12,6 +12,19 @@ from replay_buffer import ReplayBuffer
 
 Transition = namedtuple("Transition", ("state", "action", "next_state", "reward"))
 
+BATCH_SIZE = 32
+GAMMA = 0.99
+REPLAY_BUFFER_SIZE = 1000000
+LEARNING_STARTS = 50000
+LEARNING_FREQ = 4
+FRAME_HISTORY_LEN = 4
+TARGER_UPDATE_FREQ = 10000
+LEARNING_RATE = 0.00025
+ALPHA = 0.95
+EPS = 0.01
+
+
+
 
 def generate_params():
     """
@@ -57,21 +70,24 @@ def optimize_dqn(replay_buffer, params):
     pass
 
 
+
 def train(params):
     """
     Train the DQN. Assuming single episode, for now.
     """
-
-    # create env
+       
+    
+    # create env, initialize the starting state
     env = gym.make("VizdoomHealthGathering-v0")
-
+    #### INITIALIZE network with random weights
+    
     # init replay buffer
     replay_buffer = ReplayBuffer(10000)
 
     for episode in tqdm(range(params["episodes"]), desc="episodes", unit="episodes"):
 
         done = False
-        env.reset()
+        env.reset() #reset state
 
         # initialize frame stack
         frame_stack = deque(maxlen=params["stack_size"])
@@ -80,15 +96,17 @@ def train(params):
         num_skipped = 0
         timestep = 0
 
-        while not done:
+        while not done: #for each time step
             env.render()
 
             # random action (for now)
             action = env.action_space.sample()
 
+            #execute action and observe reward 
             # observation is screen info we want
             observation, reward, done, _ = env.step(action)
 
+            ##STORE experience in replay memory###
             # only want to stack every four frames
             if (timestep == 0) or (num_skipped == params["skip_frames"] - 1):
                 # reset counter
@@ -112,6 +130,15 @@ def train(params):
                 num_skipped += 1
 
             timestep += 1
+            
+            ####Sample Random Batch from replay memory####
+            ###Preprocess states from this batch####
+            ###Pass batch of preprocessed states to policy network###
+            
+            ### Calculate loss between q-actual and q-expected** #####
+            ###Gradient descent update network weights####
+            
+            
     env.close()
 
 
