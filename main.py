@@ -8,6 +8,7 @@ from matplotlib import pyplot as plt
 from torchvision import transforms
 from tqdm import tqdm
 
+from dqn import DQN
 from replay_buffer import ReplayBuffer
 
 Transition = namedtuple("Transition", ("state", "action", "next_state", "reward"))
