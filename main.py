@@ -24,8 +24,6 @@ ALPHA = 0.95
 EPS = 0.01
 
 
-
-
 def generate_params():
     """
     Generate parameters to be used by model.
@@ -37,6 +35,7 @@ def generate_params():
     params["epochs"] = 5
     params["stack_size"] = 4
     params["skip_frames"] = 4
+    params["batch_size"] = 64
 
     return params
 
@@ -45,14 +44,19 @@ def preprocess(observation):
     """
     Preprocess images to be used by DQN.
     """
+    # convert to grayscale, and reshape to be quarter of original size
     transform = transforms.Compose(
         [transforms.ToTensor(), transforms.Grayscale(), transforms.Resize((60, 80))]
     )
 
+    # return the transformed image
     return transform(observation)
 
 
 def update_stack(frame_stack, observation):
+    """
+    Update the frame stack with the an observation
+    """
     image = preprocess(observation)
 
     frame_stack.append(image)
@@ -62,32 +66,50 @@ def optimize_dqn(replay_buffer, params):
     """
     Perform optimization on the DQN given a batch of randomly
     sampled transitions from the replay buffer.
+
+    Inputs:
+        replay_buffer: buffer containing history of transitions
+        params: dictionary containing parameters for network
     """
 
+    # only want to update when we have enough transitions to sample
     if len(replay_buffer) < params["batch_size"]:
         return
 
-    pass
+    # sample batch, and transpose batch
+    sample = replay_buffer.sample(params["batch_size"])
+    batch = Transition(*zip(*sample))
 
+    # mask any transitions that have None (indicate transition to terminal state)
+    non_final_mask = torch.tensor(
+        tuple(map(lambda s: s is not None, batch.next_state)), dtype=torch.bool
+    )
+    non_final_next_states = torch.cat([s for s in batch.next_state if s is not None])
+
+    # get batches of states, actions, and rewards for DQN
+    state_batch = torch.cat(batch.state)
+    action_batch = torch.cat(batch.action)
+    reward_batch = torch.cat(batch.reward)
+
+    # TODO network output, compute Huber loss
 
 
 def train(params):
     """
     Train the DQN. Assuming single episode, for now.
     """
-       
-    
+
     # create env, initialize the starting state
     env = gym.make("VizdoomHealthGathering-v0")
     #### INITIALIZE network with random weights
-    
+
     # init replay buffer
     replay_buffer = ReplayBuffer(10000)
 
     for episode in tqdm(range(params["episodes"]), desc="episodes", unit="episodes"):
 
         done = False
-        env.reset() #reset state
+        env.reset()  # reset state
 
         # initialize frame stack
         frame_stack = deque(maxlen=params["stack_size"])
@@ -96,13 +118,13 @@ def train(params):
         num_skipped = 0
         timestep = 0
 
-        while not done: #for each time step
-            env.render()
+        while not done:
+            # env.render()
 
             # random action (for now)
             action = env.action_space.sample()
 
-            #execute action and observe reward 
+            # execute action and observe reward
             # observation is screen info we want
             observation, reward, done, _ = env.step(action)
 
@@ -119,8 +141,12 @@ def train(params):
                     stack_size, _, _ = old_stack.shape
 
                 update_stack(frame_stack, observation)
-                updated_stack = torch.cat(tuple(frame_stack), axis=0)
 
+                if not done:
+                    updated_stack = torch.cat(tuple(frame_stack), axis=0)
+                else:
+                    # when we've reached a terminal state
+                    updated_stack = None
                 # if old stack was full, we can store transition
                 if stack_size == params["stack_size"]:
                     # store transition in replay buffer
@@ -129,16 +155,16 @@ def train(params):
             else:
                 num_skipped += 1
 
+            optimize_dqn(replay_buffer, params)
             timestep += 1
-            
+
             ####Sample Random Batch from replay memory####
             ###Preprocess states from this batch####
             ###Pass batch of preprocessed states to policy network###
-            
+
             ### Calculate loss between q-actual and q-expected** #####
             ###Gradient descent update network weights####
-            
-            
+
     env.close()
 
 
