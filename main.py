@@ -1,3 +1,5 @@
+import math
+import random
 from collections import deque, namedtuple
 
 import gym
@@ -62,6 +64,28 @@ def update_stack(frame_stack, observation):
     image = preprocess(observation)
 
     frame_stack.append(image)
+
+
+BATCH_SIZE = 128
+GAMMA = 0.999
+EPS_START = 0.9
+EPS_END = 0.05
+EPS_DECAY = 200
+TARGET_UPDATE = 10
+
+
+def select_action(state, timesteps, policy_net, num_actions):
+
+    sample = random.random()
+    eps_threshold = EPS_END + (EPS_START - EPS_END) * math.exp(-1.0 * timesteps / EPS_DECAY)
+    if sample > eps_threshold:
+        with torch.no_grad():
+            # t.max(1) will return largest column value of each row.
+            # second column on max result is index of where max element was
+            # found, so we pick action with the larger expected reward.
+            return policy_net(state.unsqueeze(0)).max(1)[1].view(1, 1)
+    else:
+        return torch.tensor([[random.randrange(num_actions)]], dtype=torch.long)
 
 
 def optimize_dqn(replay_buffer, target_net, pred_net, optim, params):
@@ -129,15 +153,17 @@ def train(params):
     Train the DQN. Assuming single episode, for now.
     """
 
-    target_net = DQN(60, 80)
-    pred_net = DQN(60, 80)
+    env = gym.make("VizdoomHealthGathering-v0")
+    num_actions = env.action_space.n
+
+    target_net = DQN(60, 80, num_actions=num_actions)
+    pred_net = DQN(60, 80, num_actions=num_actions)
 
     target_net.load_state_dict(pred_net.state_dict())  # create env, initialize the starting state
     target_net.eval()
 
     optim = torch.optim.Adam(pred_net.parameters())
 
-    env = gym.make("VizdoomHealthGathering-v0")
     #### INITIALIZE network with random weights
 
     # init replay buffer
@@ -155,14 +181,16 @@ def train(params):
         num_skipped = 0
         timestep = 0
 
+        action = env.action_space.sample()
+
         while not done:
-            # env.render()
+            env.render()
 
             # random action (for now)
-            action = env.action_space.sample()
 
             # execute action and observe reward
             # observation is screen info we want
+            print("ACTION: {}".format(action))
             observation, reward, done, _ = env.step(action)
 
             ##STORE experience in replay memory###
@@ -194,9 +222,18 @@ def train(params):
             else:
                 num_skipped += 1
 
-            optimize_dqn(replay_buffer, target_net, pred_net, optim, params)
+            if timestep % 100 == 0:
+                optimize_dqn(replay_buffer, target_net, pred_net, optim, params)
+
             timestep += 1
 
+            if len(frame_stack) == 4:
+                action = select_action(
+                    torch.cat(tuple(frame_stack)), timestep, pred_net, num_actions
+                ).item()
+
+            else:
+                action = env.action_space.sample()
             if timestep % 1000 == 0:
                 target_net.load_state_dict(pred_net.state_dict())
             ####Sample Random Batch from replay memory####
