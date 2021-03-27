@@ -3,6 +3,7 @@ from collections import deque, namedtuple
 import gym
 import numpy as np
 import torch
+import torch.nn.functional as F
 import vizdoomgym
 from matplotlib import pyplot as plt
 from torchvision import transforms
@@ -63,7 +64,7 @@ def update_stack(frame_stack, observation):
     frame_stack.append(image)
 
 
-def optimize_dqn(replay_buffer, params):
+def optimize_dqn(replay_buffer, target_net, pred_net, optim, params):
     """
     Perform optimization on the DQN given a batch of randomly
     sampled transitions from the replay buffer.
@@ -74,7 +75,7 @@ def optimize_dqn(replay_buffer, params):
     """
 
     # only want to update when we have enough transitions to sample
-    if len(replay_buffer) < params["batch_size"]:
+    if len(replay_buffer) < params["batch_size"] * 2:
         return
 
     # sample batch, and transpose batch
@@ -85,14 +86,42 @@ def optimize_dqn(replay_buffer, params):
     non_final_mask = torch.tensor(
         tuple(map(lambda s: s is not None, batch.next_state)), dtype=torch.bool
     )
-    non_final_next_states = torch.cat([s for s in batch.next_state if s is not None])
+    non_final_next_states = torch.stack([s for s in batch.next_state if s is not None])
 
+    # print(batch.action)
     # get batches of states, actions, and rewards for DQN
-    state_batch = torch.cat(batch.state)
-    action_batch = torch.cat(batch.action)
-    reward_batch = torch.cat(batch.reward)
+    state_batch = torch.stack(batch.state)
+    action_batch = torch.stack(batch.action)
+    reward_batch = torch.stack(batch.reward)
 
-    # TODO network output, compute Huber loss
+    # print("State size: {}".format(state_batch.shape))
+
+    # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
+    # columns of actions taken. These are the actions which would've been taken
+    # for each batch state according to policy_net
+    # print("Shape: {}".format(state_batch.shape))
+    state_action_values = pred_net(state_batch).gather(1, action_batch)
+
+    # Compute V(s_{t+1}) for all next states.
+    # Expected values of actions for non_final_next_states are computed based
+    # on the "older" target_net; selecting their best reward with max(1)[0].
+    # This is merged based on the mask, such that we'll have either the expected
+    # state value or 0 in case the state was final.
+    next_state_values = torch.zeros(params["batch_size"])
+    next_state_values[non_final_mask] = target_net(non_final_next_states).max(1)[0].detach()
+    # Compute the expected Q values
+    expected_state_action_values = (next_state_values * GAMMA).unsqueeze(1) + reward_batch
+
+    # Compute Huber loss
+    loss = F.smooth_l1_loss(state_action_values, expected_state_action_values)
+
+    print("Loss: {}".format(loss.item()))
+    # Optimize the model
+    optim.zero_grad()
+    loss.backward()
+    for param in pred_net.parameters():
+        param.grad.data.clamp_(-1, 1)
+    optim.step()
 
 
 def train(params):
@@ -100,7 +129,14 @@ def train(params):
     Train the DQN. Assuming single episode, for now.
     """
 
-    # create env, initialize the starting state
+    target_net = DQN(60, 80)
+    pred_net = DQN(60, 80)
+
+    target_net.load_state_dict(pred_net.state_dict())  # create env, initialize the starting state
+    target_net.eval()
+
+    optim = torch.optim.Adam(pred_net.parameters())
+
     env = gym.make("VizdoomHealthGathering-v0")
     #### INITIALIZE network with random weights
 
@@ -151,14 +187,18 @@ def train(params):
                 # if old stack was full, we can store transition
                 if stack_size == params["stack_size"]:
                     # store transition in replay buffer
-                    replay_buffer.push(old_stack, action, updated_stack, reward)
+                    replay_buffer.push(
+                        old_stack, torch.tensor([action]), updated_stack, torch.tensor([reward])
+                    )
 
             else:
                 num_skipped += 1
 
-            optimize_dqn(replay_buffer, params)
+            optimize_dqn(replay_buffer, target_net, pred_net, optim, params)
             timestep += 1
 
+            if timestep % 1000 == 0:
+                target_net.load_state_dict(pred_net.state_dict())
             ####Sample Random Batch from replay memory####
             ###Preprocess states from this batch####
             ###Pass batch of preprocessed states to policy network###
