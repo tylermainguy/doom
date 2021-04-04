@@ -52,6 +52,12 @@ class Trainer:
         # Initialize optimizer
         self.optimizer = torch.optim.Adam(self.pred_net.parameters())
 
+        if self.params["device"] == "cuda":
+            self.target_net = torch.nn.DataParallel(self.target_net)
+            self.pred_net = torch.nn.DataParallel(self.target_net)
+
+            self.target_net = self.target_net.to(self.params["device"])
+            self.pred_net = self.pred_net.to(self.params["device"])
         # Initialize replay memory
         self.replay_buffer = ReplayBuffer(20000)
 
@@ -219,6 +225,9 @@ class Trainer:
         state_batch = torch.stack(batch.state)
         action_batch = torch.stack(batch.action)
         reward_batch = torch.stack(batch.reward)
+
+        state_batch = state_batch.to(self.params["device"])
+        non_final_next_states = state_batch.to(self.params["device"])
 
         # Calculate the Q-value of the current state-action pair using the model.
         state_action_values = self.pred_net(state_batch).gather(1, action_batch)

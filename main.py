@@ -17,6 +17,7 @@ def generate_params():
     params["stack_size"] = 4
     params["skip_frames"] = 4
     params["batch_size"] = 40
+    params["device"] = "cpu"
 
     return params
 
@@ -31,6 +32,8 @@ def main():
 
     params = generate_params()
 
+    if torch.cuda.is_available():
+        params["device"] = "cuda"
     trainer = Trainer(params)
 
     for epoch in range(params["epochs"]):
