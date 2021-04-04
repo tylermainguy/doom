@@ -72,6 +72,7 @@ class Trainer:
         self.target_net.eval()
 
         frames = 0
+        steps = 0
         for episode in tqdm(range(self.params["episodes"]), desc="episodes", unit="episodes"):
 
             done = False
@@ -125,8 +126,9 @@ class Trainer:
                     # if we can select action using frame stack
                     if len(self.frame_stack) == 4:
                         action = self.select_action(
-                            torch.cat(tuple(self.frame_stack)), timestep, self.num_actions
+                            torch.cat(tuple(self.frame_stack)), steps, self.num_actions
                         ).item()
+                        steps += 1
 
                 else:
                     num_skipped += 1
@@ -142,8 +144,6 @@ class Trainer:
                     self.target_net.load_state_dict(self.pred_net.state_dict())
                     torch.save(self.pred_net.state_dict(), "model.pk")
 
-                timestep += 1
-
             # print("average loss: {}".format(self.losses.avg))
 
         self.env.close()
@@ -152,8 +152,12 @@ class Trainer:
     def evaluate(self):
         """Visually evaluate models performance."""
 
-        self.pred_net.load_state_dict(torch.load("model.pk"))
-        self.target_net.load_state_dict(torch.load("model.pk"))
+        self.pred_net.load_state_dict(
+            torch.load("model.pk", map_location=torch.device(self.params["device"]))
+        )
+        self.target_net.load_state_dict(
+            torch.load("model.pk", map_location=torch.device(self.params["device"]))
+        )
 
         for episode in tqdm(range(self.params["episodes"]), desc="episodes", unit="episodes"):
 
