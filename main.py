@@ -39,6 +39,7 @@ def main():
     for epoch in range(params["epochs"]):
         print("epoch {}".format(epoch))
         trainer.train(epoch)
+        trainer.evaluate()
 
 
 if __name__ == "__main__":

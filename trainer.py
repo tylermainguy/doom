@@ -50,7 +50,7 @@ class Trainer:
         self.target_net.eval()
 
         # Initialize optimizer
-        self.optimizer = torch.optim.Adam(self.pred_net.parameters())
+        self.optimizer = torch.optim.Adam(self.pred_net.parameters(), 3e-4)
 
         if self.params["device"] == "cuda":
             self.target_net = torch.nn.DataParallel(self.target_net)
@@ -59,7 +59,7 @@ class Trainer:
             self.target_net = self.target_net.to(self.params["device"])
             self.pred_net = self.pred_net.to(self.params["device"])
         # Initialize replay memory
-        self.replay_buffer = ReplayBuffer(20000)
+        self.replay_buffer = ReplayBuffer(100000)
 
         # Initialize frame stack
         self.stack_size = params["stack_size"]
@@ -69,8 +69,93 @@ class Trainer:
 
         self.writer = SummaryWriter()
 
+    @torch.enable_grad()
     def train(self, epoch):
         """Run a single epoch of training."""
+        self.target_net.eval()
+
+        frames = 0
+        for episode in tqdm(range(self.params["episodes"]), desc="episodes", unit="episodes"):
+
+            done = False
+            self.env.reset()
+
+            # For frame skipping
+            num_skipped = 0
+            timestep = 0
+
+            action = self.env.action_space.sample()
+
+            self.reset_stack()
+
+            while not done:
+                frames += 1
+                # self.env.render()
+                observation, reward, done, _ = self.env.step(action)
+
+                # only want to stack every four frames
+                if (timestep == 0) or (num_skipped == self.params["skip_frames"] - 1):
+
+                    # reset counter
+                    num_skipped = 0
+
+                    # get old stack, and update stack with current observation
+                    if len(self.frame_stack) > 0:
+                        old_stack = torch.cat(tuple(self.frame_stack), axis=0)
+                        curr_size, _, _ = old_stack.shape
+
+                    else:
+                        curr_size = 0
+
+                    self.update_stack(observation)
+
+                    if not done:
+                        updated_stack = torch.cat(tuple(self.frame_stack), axis=0)
+                    else:
+                        # when we've reached a terminal state
+                        updated_stack = None
+
+                    # if old stack was full, we can store transition
+                    if curr_size == self.params["stack_size"]:
+                        # store transition in replay buffer
+                        self.replay_buffer.push(
+                            old_stack,
+                            torch.tensor([action]),
+                            updated_stack,
+                            torch.tensor([reward]),
+                        )
+
+                    # if we can select action using frame stack
+                    if len(self.frame_stack) == 4:
+                        action = self.select_action(
+                            torch.cat(tuple(self.frame_stack)), timestep, self.num_actions
+                        ).item()
+
+                else:
+                    num_skipped += 1
+
+                # optimize network every 100 timesteps
+                if frames % 4 == 0:
+                    self.optimize_dqn()
+                    self.writer.add_scalar(
+                        "loss", self.losses.avg, epoch * self.params["episodes"] + episode
+                    )
+
+                timestep += 1
+
+            if frames % 10000 == 0:
+                self.target_net.load_state_dict(self.pred_net.state_dict())
+                torch.save(self.model.state_dict(), "model.pk")
+            # print("average loss: {}".format(self.losses.avg))
+
+        self.env.close()
+
+    @torch.no_grad()
+    def evaluate(self):
+        """Visually evaluate models performance."""
+
+        self.pred_net.load_state_dict("model.pk")
+        self.target_net.load_state_dict("model.pk")
 
         for episode in tqdm(range(self.params["episodes"]), desc="episodes", unit="episodes"):
 
@@ -129,19 +214,6 @@ class Trainer:
 
                 else:
                     num_skipped += 1
-
-                # optimize network every 100 timesteps
-                if timestep % 200 == 0:
-                    self.optimize_dqn()
-                    self.writer.add_scalar(
-                        "loss", self.losses.avg, epoch * self.params["episodes"] + episode
-                    )
-
-                timestep += 1
-            self.target_net.load_state_dict(self.pred_net.state_dict())
-            # print("average loss: {}".format(self.losses.avg))
-
-        self.env.close()
 
     def reset_stack(self):
         """reset frame stack."""
@@ -227,7 +299,7 @@ class Trainer:
         reward_batch = torch.stack(batch.reward)
 
         state_batch = state_batch.to(self.params["device"])
-        non_final_next_states = state_batch.to(self.params["device"])
+        non_final_next_states = non_final_next_states.to(self.params["device"])
 
         # Calculate the Q-value of the current state-action pair using the model.
         state_action_values = self.pred_net(state_batch).gather(1, action_batch)
@@ -252,6 +324,6 @@ class Trainer:
         loss.backward()
 
         # gradient clipping
-        torch.nn.utils.clip_grad_norm_(self.pred_net.parameters(), 0.25)
+        torch.nn.utils.clip_grad_norm_(self.pred_net.parameters(), 1)
 
         self.optimizer.step()
