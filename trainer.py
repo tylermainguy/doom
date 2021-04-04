@@ -53,10 +53,11 @@ class Trainer:
         self.optimizer = torch.optim.Adam(self.pred_net.parameters(), 3e-4)
 
         if self.params["device"] == "cuda":
+
             self.target_net = self.target_net.to(self.params["device"])
             self.pred_net = self.pred_net.to(self.params["device"])
         # Initialize replay memory
-        self.replay_buffer = ReplayBuffer(100000)
+        self.replay_buffer = ReplayBuffer(50000)
 
         # Initialize frame stack
         self.stack_size = params["stack_size"]
@@ -130,21 +131,19 @@ class Trainer:
                         ).item()
                         steps += 1
 
+                    # optimize network every 100 timesteps
+                    if steps % 20 == 0:
+                        self.optimize_dqn()
+                        self.writer.add_scalar(
+                            "loss", self.losses.avg, epoch * self.params["episodes"] + episode
+                        )
+
+                    if steps % 10000 == 0:
+                        self.target_net.load_state_dict(self.pred_net.state_dict())
+                        torch.save(self.pred_net.state_dict(), "model.pk")
+
                 else:
                     num_skipped += 1
-
-                # optimize network every 100 timesteps
-                if frames % 4 == 0:
-                    self.optimize_dqn()
-                    self.writer.add_scalar(
-                        "loss", self.losses.avg, epoch * self.params["episodes"] + episode
-                    )
-
-                if frames % 10000 == 0:
-                    self.target_net.load_state_dict(self.pred_net.state_dict())
-                    torch.save(self.pred_net.state_dict(), "model.pk")
-
-            # print("average loss: {}".format(self.losses.avg))
 
         self.env.close()
 
