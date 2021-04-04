@@ -53,9 +53,6 @@ class Trainer:
         self.optimizer = torch.optim.Adam(self.pred_net.parameters(), 3e-4)
 
         if self.params["device"] == "cuda":
-            self.target_net = torch.nn.DataParallel(self.target_net)
-            self.pred_net = torch.nn.DataParallel(self.target_net)
-
             self.target_net = self.target_net.to(self.params["device"])
             self.pred_net = self.pred_net.to(self.params["device"])
         # Initialize replay memory
@@ -141,11 +138,12 @@ class Trainer:
                         "loss", self.losses.avg, epoch * self.params["episodes"] + episode
                     )
 
+                if frames % 10000 == 0:
+                    self.target_net.load_state_dict(self.pred_net.state_dict())
+                    torch.save(self.pred_net.state_dict(), "model.pk")
+
                 timestep += 1
 
-            if frames % 10000 == 0:
-                self.target_net.load_state_dict(self.pred_net.state_dict())
-                torch.save(self.model.state_dict(), "model.pk")
             # print("average loss: {}".format(self.losses.avg))
 
         self.env.close()
@@ -154,8 +152,8 @@ class Trainer:
     def evaluate(self):
         """Visually evaluate models performance."""
 
-        self.pred_net.load_state_dict("model.pk")
-        self.target_net.load_state_dict("model.pk")
+        self.pred_net.load_state_dict(torch.load("model.pk"))
+        self.target_net.load_state_dict(torch.load("model.pk"))
 
         for episode in tqdm(range(self.params["episodes"]), desc="episodes", unit="episodes"):
 
@@ -258,7 +256,8 @@ class Trainer:
         if sample > eps_threshold:
             with torch.no_grad():
                 # choose action with highest q-value
-                return self.pred_net(state.unsqueeze(0)).max(1)[1].view(1, 1)
+                state = state.unsqueeze(0).to(self.params["device"])
+                return self.pred_net(state).max(1)[1].view(1, 1)
         # explore
         else:
             return torch.tensor([[random.randrange(num_actions)]], dtype=torch.long)
@@ -290,21 +289,20 @@ class Trainer:
         # mask any transitions that have None (indicate transition to terminal state)
         non_final_mask = torch.tensor(
             tuple(map(lambda s: s is not None, batch.next_state)), dtype=torch.bool
+        ).to(self.params["device"])
+        non_final_next_states = torch.stack([s for s in batch.next_state if s is not None]).to(
+            self.params["device"]
         )
-        non_final_next_states = torch.stack([s for s in batch.next_state if s is not None])
 
         # get batches of states, actions, and rewards for DQN
-        state_batch = torch.stack(batch.state)
-        action_batch = torch.stack(batch.action)
-        reward_batch = torch.stack(batch.reward)
-
-        state_batch = state_batch.to(self.params["device"])
-        non_final_next_states = non_final_next_states.to(self.params["device"])
+        state_batch = torch.stack(batch.state).to(self.params["device"])
+        action_batch = torch.stack(batch.action).to(self.params["device"])
+        reward_batch = torch.stack(batch.reward).to(self.params["device"])
 
         # Calculate the Q-value of the current state-action pair using the model.
         state_action_values = self.pred_net(state_batch).gather(1, action_batch)
 
-        next_state_values = torch.zeros(self.params["batch_size"])
+        next_state_values = torch.zeros(self.params["batch_size"]).to(self.params["device"])
 
         # find values associated with non-final transitions
         next_state_values[non_final_mask] = (
