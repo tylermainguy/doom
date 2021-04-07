@@ -18,6 +18,7 @@ def generate_params():
     params["skip_frames"] = 4
     params["batch_size"] = 40
     params["device"] = "cpu"
+    params["load_model"] = True
 
     return params
 
@@ -38,8 +39,8 @@ def main():
 
     for epoch in range(params["epochs"]):
         print("epoch {}".format(epoch))
-        trainer.train(epoch)
-        # trainer.evaluate()
+        # trainer.train(epoch)
+        trainer.evaluate()
 
 
 if __name__ == "__main__":

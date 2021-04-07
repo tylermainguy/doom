@@ -75,6 +75,15 @@ class Trainer:
 
         frames = 0
         steps = 0
+
+        if self.params["load_model"]:
+            self.pred_net.load_state_dict(
+                torch.load("model.pk", map_location=torch.device(self.params["device"]))
+            )
+            self.target_net.load_state_dict(
+                torch.load("model.pk", map_location=torch.device(self.params["device"]))
+            )
+
         for episode in tqdm(range(self.params["episodes"]), desc="episodes", unit="episodes"):
 
             done = False
