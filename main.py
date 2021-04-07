@@ -11,14 +11,13 @@ def generate_params():
     """
     params = {}
 
-    params["timesteps"] = 1000
-    params["episodes"] = 500
+    params["episodes"] = 5000
     params["epochs"] = 5
     params["stack_size"] = 4
     params["skip_frames"] = 4
     params["batch_size"] = 40
     params["device"] = "cpu"
-    params["load_model"] = True
+    params["load_model"] = False
 
     return params
 
@@ -37,10 +36,8 @@ def main():
         params["device"] = "cuda"
     trainer = Trainer(params)
 
-    for epoch in range(params["epochs"]):
-        print("epoch {}".format(epoch))
-        # trainer.train(epoch)
-        trainer.evaluate()
+    trainer.train()
+    # trainer.evaluate()
 
 
 if __name__ == "__main__":

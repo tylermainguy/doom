@@ -22,7 +22,7 @@ Transition = namedtuple("Transition", ("state", "action", "next_state", "reward"
 BATCH_SIZE : The number of samples to be used as input when training the model
 GAMMA :  The  
 """
-BATCH_SIZE = 128
+BATCH_SIZE = 40
 GAMMA = 0.999
 EPS_START = 0.9
 EPS_END = 0.05
@@ -62,14 +62,13 @@ class Trainer:
         # Initialize frame stack
         self.stack_size = params["stack_size"]
         self.frame_stack = deque(maxlen=self.stack_size)
-        self.stack_rewards = deque(maxlen=self.stack_size)
 
         self.losses = AverageMeter()
 
         self.writer = SummaryWriter()
 
     @torch.enable_grad()
-    def train(self, epoch):
+    def train(self):
         """Run a single epoch of training."""
         self.target_net.eval()
 
@@ -120,8 +119,7 @@ class Trainer:
                     else:
                         curr_size = 0
 
-                    self.update_stack(observation, reward)
-                    skipped_rewards = 0
+                    self.update_stack(observation)
 
                     if not done:
                         updated_stack = torch.cat(tuple(self.frame_stack), axis=0)
@@ -131,15 +129,15 @@ class Trainer:
 
                     # if old stack was full, we can store transition
                     if curr_size == self.params["stack_size"]:
-                        total_reward = self.get_stack_sum()
                         # store transition in replay buffer
                         self.replay_buffer.push(
                             old_stack,
                             torch.tensor([action]),
                             updated_stack,
-                            torch.tensor([total_reward]),
+                            torch.tensor([skipped_rewards]),
                         )
 
+                    skipped_rewards = 0
                     # if we can select action using frame stack
                     if len(self.frame_stack) == 4:
                         action = self.select_action(
@@ -148,13 +146,11 @@ class Trainer:
                         steps += 1
 
                     # optimize network every 100 timesteps
-                    if steps % 20 == 0:
+                    if steps % 4 == 0:
                         self.optimize_dqn()
-                        self.writer.add_scalar(
-                            "loss", self.losses.avg, epoch * self.params["episodes"] + episode
-                        )
+                        self.writer.add_scalar("loss", self.losses.avg)
 
-                    if steps % 10000 == 0:
+                    if steps % 2000 == 0:
                         self.target_net.load_state_dict(self.pred_net.state_dict())
                         torch.save(self.pred_net.state_dict(), "model.pk")
 
@@ -209,7 +205,7 @@ class Trainer:
                         curr_size = 0
 
                     skipped_reward = float(skipped_reward) / self.params["skip_frames"]
-                    self.update_stack(observation, skipped_reward)
+                    self.update_stack(observation)
                     skipped_reward = 0
 
                     if not done:
@@ -232,7 +228,7 @@ class Trainer:
         """reset frame stack."""
         self.frame_stack = deque(maxlen=self.stack_size)
 
-    def update_stack(self, observation, reward):
+    def update_stack(self, observation):
         """
         Update the frame stack with the an observation
         This function will create stacks of four consequtive
@@ -241,15 +237,6 @@ class Trainer:
         image = self.preprocess(observation)
 
         self.frame_stack.append(image)
-        self.stack_rewards.append(reward)
-
-    def get_stack_sum(self):
-        total = 0
-
-        for reward in self.stack_rewards:
-            total += reward
-
-        return total
 
     def preprocess(self, observation):
         """
