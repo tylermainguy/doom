@@ -62,6 +62,7 @@ class Trainer:
         # Initialize frame stack
         self.stack_size = params["stack_size"]
         self.frame_stack = deque(maxlen=self.stack_size)
+        self.stack_rewards = deque(maxlen=self.stack_size)
 
         self.losses = AverageMeter()
 
@@ -81,7 +82,7 @@ class Trainer:
 
             # For frame skipping
             num_skipped = 0
-            timestep = 0
+            skipped_rewards = 0
 
             action = self.env.action_space.sample()
 
@@ -89,14 +90,18 @@ class Trainer:
 
             while not done:
                 frames += 1
-                # self.env.render()
+                self.env.render()
                 observation, reward, done, _ = self.env.step(action)
+                skipped_rewards += reward
 
                 # only want to stack every four frames
-                if (timestep == 0) or (num_skipped == self.params["skip_frames"] - 1):
+                if num_skipped == self.params["skip_frames"] - 1:
 
                     # reset counter
                     num_skipped = 0
+
+                    # want average reward over skipped frames
+                    skipped_rewards = float(skipped_rewards) / self.params["skip_frames"]
 
                     # get old stack, and update stack with current observation
                     if len(self.frame_stack) > 0:
@@ -106,7 +111,8 @@ class Trainer:
                     else:
                         curr_size = 0
 
-                    self.update_stack(observation)
+                    self.update_stack(observation, reward)
+                    skipped_rewards = 0
 
                     if not done:
                         updated_stack = torch.cat(tuple(self.frame_stack), axis=0)
@@ -116,12 +122,13 @@ class Trainer:
 
                     # if old stack was full, we can store transition
                     if curr_size == self.params["stack_size"]:
+                        total_reward = self.get_stack_sum()
                         # store transition in replay buffer
                         self.replay_buffer.push(
                             old_stack,
                             torch.tensor([action]),
                             updated_stack,
-                            torch.tensor([reward]),
+                            torch.tensor([total_reward]),
                         )
 
                     # if we can select action using frame stack
@@ -158,6 +165,7 @@ class Trainer:
             torch.load("model.pk", map_location=torch.device(self.params["device"]))
         )
 
+        steps = 0
         for episode in tqdm(range(self.params["episodes"]), desc="episodes", unit="episodes"):
 
             done = False
@@ -165,7 +173,7 @@ class Trainer:
 
             # For frame skipping
             num_skipped = 0
-            timestep = 0
+            skipped_reward = 0
 
             action = self.env.action_space.sample()
 
@@ -175,8 +183,10 @@ class Trainer:
                 self.env.render()
                 observation, reward, done, _ = self.env.step(action)
 
+                skipped_reward += reward
+
                 # only want to stack every four frames
-                if (timestep == 0) or (num_skipped == self.params["skip_frames"] - 1):
+                if num_skipped == self.params["skip_frames"] - 1:
 
                     # reset counter
                     num_skipped = 0
@@ -189,7 +199,9 @@ class Trainer:
                     else:
                         curr_size = 0
 
-                    self.update_stack(observation)
+                    skipped_reward = float(skipped_reward) / self.params["skip_frames"]
+                    self.update_stack(observation, skipped_reward)
+                    skipped_reward = 0
 
                     if not done:
                         updated_stack = torch.cat(tuple(self.frame_stack), axis=0)
@@ -197,21 +209,12 @@ class Trainer:
                         # when we've reached a terminal state
                         updated_stack = None
 
-                    # if old stack was full, we can store transition
-                    if curr_size == self.params["stack_size"]:
-                        # store transition in replay buffer
-                        self.replay_buffer.push(
-                            old_stack,
-                            torch.tensor([action]),
-                            updated_stack,
-                            torch.tensor([reward]),
-                        )
-
                     # if we can select action using frame stack
                     if len(self.frame_stack) == 4:
                         action = self.select_action(
-                            torch.cat(tuple(self.frame_stack)), timestep, self.num_actions
+                            torch.cat(tuple(self.frame_stack)), steps, self.num_actions
                         ).item()
+                        steps += 1
 
                 else:
                     num_skipped += 1
@@ -220,7 +223,7 @@ class Trainer:
         """reset frame stack."""
         self.frame_stack = deque(maxlen=self.stack_size)
 
-    def update_stack(self, observation):
+    def update_stack(self, observation, reward):
         """
         Update the frame stack with the an observation
         This function will create stacks of four consequtive
@@ -229,6 +232,15 @@ class Trainer:
         image = self.preprocess(observation)
 
         self.frame_stack.append(image)
+        self.stack_rewards.append(reward)
+
+    def get_stack_sum(self):
+        total = 0
+
+        for reward in self.stack_rewards:
+            total += reward
+
+        return total
 
     def preprocess(self, observation):
         """
