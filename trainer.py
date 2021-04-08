@@ -273,10 +273,10 @@ class Trainer:
             return torch.tensor([[random.randrange(num_actions)]], dtype=torch.long)
 
     def epsilon_decay(self):
-        if self.learning_steps < 100000 or self.learning_steps > 200000:
+        if self.learning_steps < 10000 or self.learning_steps > 30000:
             return
 
-        decay_rate = (self.params["eps_start"] - self.params["eps_end"]) / 100000.0
+        decay_rate = (self.params["eps_start"] - self.params["eps_end"]) / 20000.0
         self.epsilon = self.params["eps_start"] - decay_rate * self.learning_steps
 
     def train_dqn(self):
