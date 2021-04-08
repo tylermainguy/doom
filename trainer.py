@@ -17,9 +17,15 @@ from replay_memory import ReplayMemory
 # Initialize tranisiton memory  tuple
 Transition = namedtuple("Transition", ("state", "action", "next_state", "reward"))
 
-EPS_START = 1.0
-EPS_END = 0.05
-EPS_DECAY = 200
+
+def init_weights(m):
+    if type(m) == torch.nn.Linear:
+        torch.nn.init.kaiming_uniform(m.weight)
+        m.bias.data.fill_(0.01)
+
+
+# net = nn.Sequential(nn.Linear(2, 2), nn.Linear(2, 2))
+# net.apply(init_weights)
 
 
 class Trainer:
@@ -36,6 +42,8 @@ class Trainer:
         # Intitialize both deep Q networks
         self.target_net = DQN(60, 80, num_actions=self.num_actions)
         self.pred_net = DQN(60, 80, num_actions=self.num_actions)
+
+        self.pred_net.apply(init_weights)
 
         # Create env, initialize the starting state
         self.target_net.load_state_dict(self.pred_net.state_dict())
