@@ -17,17 +17,9 @@ from replay_memory import ReplayMemory
 # Initialize tranisiton memory  tuple
 Transition = namedtuple("Transition", ("state", "action", "next_state", "reward"))
 
-## Global Parameter Initilization
-"""
-BATCH_SIZE : The number of samples to be used as input when training the model
-GAMMA :  The  
-"""
-BATCH_SIZE = 40
-GAMMA = 0.999
-EPS_START = 0.9
+EPS_START = 1.0
 EPS_END = 0.05
 EPS_DECAY = 200
-TARGET_UPDATE = 10
 
 
 class Trainer:
@@ -264,7 +256,9 @@ class Trainer:
         """
         # threshold for exploration
         sample = random.random()
-        eps_threshold = EPS_END + (EPS_START - EPS_END) * math.exp(-1.0 * timesteps / EPS_DECAY)
+        eps_threshold = self.params["eps_end"] + (
+            self.params["eps_start"] - self.params["eps_end"]
+        ) * math.exp(-1.0 * timesteps / self.params["eps_decay"])
 
         # exploit
         if sample > eps_threshold:
@@ -321,6 +315,6 @@ class Trainer:
         huber_loss.backward()
 
         # # gradient clipping
-        # torch.nn.utils.clip_grad_norm_(self.pred_net.parameters(), 1)
+        torch.nn.utils.clip_grad_norm_(self.pred_net.parameters(), 1)
 
         self.optimizer.step()

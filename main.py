@@ -19,6 +19,9 @@ def generate_params():
     params["device"] = "cpu"
     params["load_model"] = False
     params["gamma"] = 0.99
+    params["eps_start"] = 0.95
+    params["eps_end"] = 0.05
+    params["eps_decay"] = 200
 
     return params
 
@@ -37,8 +40,8 @@ def main():
         params["device"] = "cuda"
     trainer = Trainer(params)
 
-    trainer.train()
-    # trainer.evaluate()
+    # trainer.train()
+    trainer.evaluate()
 
 
 if __name__ == "__main__":
