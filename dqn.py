@@ -8,11 +8,8 @@ class DQN(nn.Module):
     def __init__(self, height, width, in_channels=4, num_actions=20):
         super(DQN, self).__init__()
         self.conv1 = nn.Conv2d(in_channels, out_channels=32, kernel_size=7)
-        self.bn1 = nn.BatchNorm2d(32)
         self.conv2 = nn.Conv2d(32, 64, kernel_size=5)
-        self.bn2 = nn.BatchNorm2d(64)
         self.conv3 = nn.Conv2d(64, 64, kernel_size=3)
-        self.bn3 = nn.BatchNorm2d(64)
 
         # calculate size of output after convolutional layers
         def conv2d_size_out(size, kernel_size=3, stride=1):
@@ -33,8 +30,8 @@ class DQN(nn.Module):
 
     def forward(self, x):
         """Forward pass."""
-        x = F.relu(self.bn1(self.conv1(x)))
-        x = F.relu(self.bn2(self.conv2(x)))
-        x = F.relu(self.bn3(self.conv3(x)))
+        x = F.relu(self.conv1(x))
+        x = F.relu(self.conv2(x))
+        x = F.relu(self.conv3(x))
 
         return self.fc4(x.view(x.size(0), -1))

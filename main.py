@@ -18,6 +18,7 @@ def generate_params():
     params["batch_size"] = 40
     params["device"] = "cpu"
     params["load_model"] = False
+    params["gamma"] = 0.99
 
     return params
 

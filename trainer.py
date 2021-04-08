@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 from average_meter import AverageMeter
 from dqn import DQN
-from replay_buffer import ReplayBuffer
+from replay_memory import ReplayMemory
 
 # Initialize tranisiton memory  tuple
 Transition = namedtuple("Transition", ("state", "action", "next_state", "reward"))
@@ -57,7 +57,7 @@ class Trainer:
             self.target_net = self.target_net.to(self.params["device"])
             self.pred_net = self.pred_net.to(self.params["device"])
         # Initialize replay memory
-        self.replay_buffer = ReplayBuffer(50000)
+        self.replay_memory = ReplayMemory(50000)
 
         # Initialize frame stack
         self.stack_size = params["stack_size"]
@@ -98,7 +98,7 @@ class Trainer:
 
             while not done:
                 frames += 1
-                self.env.render()
+                # self.env.render()
                 observation, reward, done, _ = self.env.step(action)
                 skipped_rewards += reward
 
@@ -130,7 +130,8 @@ class Trainer:
                     # if old stack was full, we can store transition
                     if curr_size == self.params["stack_size"]:
                         # store transition in replay buffer
-                        self.replay_buffer.push(
+
+                        self.replay_memory.add_memory(
                             old_stack,
                             torch.tensor([action]),
                             updated_stack,
@@ -147,8 +148,10 @@ class Trainer:
 
                     # optimize network every 100 timesteps
                     if steps % 4 == 0:
-                        self.optimize_dqn()
-                        self.writer.add_scalar("loss", self.losses.avg)
+                        # self.optimize_dqn()
+                        self.train_dqn()
+                        # return
+                        # self.writer.add_scalar("loss", self.losses.avg)
 
                     if steps % 2000 == 0:
                         self.target_net.load_state_dict(self.pred_net.state_dict())
@@ -273,66 +276,51 @@ class Trainer:
         else:
             return torch.tensor([[random.randrange(num_actions)]], dtype=torch.long)
 
-    def optimize_dqn(self):
+    def train_dqn(self):
         """
         Perform optimization on the DQN given a batch of randomly
         sampled transitions from the replay buffer.
-
-        Inputs:
-            replay_buffer: buffer containing history of transitions
-            params: dictionary containing parameters for network
-            target_net: the network for used to compute the q-value of next states
-            pred_net : The main deep Q network
-            optim : the optimizer used to minimize the model loss
-
-        This function contains the code the calculates the models Q-values for
-        the current and next state. It also calcuates the subsequent huber loss.
         """
 
-        # only want to update when we have enough transitions to sample
-        if len(self.replay_buffer) < self.params["batch_size"] * 2:
+        # need to be able to sample
+        if len(self.replay_memory) < self.params["batch_size"]:
             return
 
-        # sample batch, and transpose batch
-        sample = self.replay_buffer.sample(self.params["batch_size"])
-        batch = Transition(*zip(*sample))
+        batch = self.replay_memory.sample(self.params["batch_size"])
 
-        # mask any transitions that have None (indicate transition to terminal state)
-        non_final_mask = torch.tensor(
-            tuple(map(lambda s: s is not None, batch.next_state)), dtype=torch.bool
-        ).to(self.params["device"])
-        non_final_next_states = torch.stack([s for s in batch.next_state if s is not None]).to(
+        new_states = [x[2] for x in batch]
+
+        # can't transition to None (termination)
+        non_terminating_filter = torch.tensor(
+            tuple(map(lambda s: s is not None, new_states)), device=self.params["device"],
+        )
+        non_terminating = torch.stack([s for s in new_states if s is not None]).to(
             self.params["device"]
         )
 
-        # get batches of states, actions, and rewards for DQN
-        state_batch = torch.stack(batch.state).to(self.params["device"])
-        action_batch = torch.stack(batch.action).to(self.params["device"])
-        reward_batch = torch.stack(batch.reward).to(self.params["device"])
+        states = torch.stack([x[0] for x in batch]).to(self.params["device"])
+        actions = torch.stack([x[1] for x in batch]).to(self.params["device"])
+        rewards = torch.stack([x[3] for x in batch]).to(self.params["device"])
 
-        # Calculate the Q-value of the current state-action pair using the model.
-        state_action_values = self.pred_net(state_batch).gather(1, action_batch)
+        with torch.no_grad():
+            predicted = self.pred_net(states)
+            action_val = predicted.gather(1, actions)
 
-        next_state_values = torch.zeros(self.params["batch_size"]).to(self.params["device"])
+        target_vals = torch.zeros(self.params["batch_size"], device=self.params["device"])
 
-        # find values associated with non-final transitions
-        next_state_values[non_final_mask] = (
-            self.target_net(non_final_next_states).max(1)[0].detach()
-        )
+        # # calculate maximum action for new states
+        target_vals[non_terminating_filter] = self.target_net(non_terminating).max(dim=1)[0]
+        target_vals = target_vals.unsqueeze(1)
 
-        # calculate expected value using non-terminal transition values
-        expected_state_action_values = (next_state_values * GAMMA).unsqueeze(1) + reward_batch
+        target_update = (self.params["gamma"] * target_vals) + rewards
 
-        # Compute Huber loss
-        loss = F.smooth_l1_loss(state_action_values, expected_state_action_values)
+        huber_loss = F.smooth_l1_loss(action_val, target_update)
 
-        self.losses.update(loss.item(), self.params["batch_size"])
-
-        # Optimize the model
         self.optimizer.zero_grad()
-        loss.backward()
 
-        # gradient clipping
-        torch.nn.utils.clip_grad_norm_(self.pred_net.parameters(), 1)
+        huber_loss.backward()
+
+        # # gradient clipping
+        # torch.nn.utils.clip_grad_norm_(self.pred_net.parameters(), 1)
 
         self.optimizer.step()
