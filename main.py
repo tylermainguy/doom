@@ -40,8 +40,8 @@ def main():
         params["device"] = "cuda"
     trainer = Trainer(params)
 
-    # trainer.train()
-    trainer.evaluate()
+    trainer.train()
+    # trainer.evaluate()
 
 
 if __name__ == "__main__":

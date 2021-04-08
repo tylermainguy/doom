@@ -98,8 +98,11 @@ class Trainer:
 
             while not done:
                 frames += 1
-                # self.env.render()
+                self.env.render()
                 observation, reward, done, _ = self.env.step(action)
+
+                if action == 2 and reward < 0:
+                    reward = -6.0
                 skipped_rewards += reward
 
                 # only want to stack every four frames
@@ -149,7 +152,7 @@ class Trainer:
                     # optimize network every 100 timesteps
                     if steps % 4 == 0:
                         # self.optimize_dqn()
-                        self.train_dqn()
+                        # self.train_dqn()
                         # return
                         # self.writer.add_scalar("loss", self.losses.avg)
 
