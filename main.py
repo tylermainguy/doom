@@ -11,7 +11,7 @@ def generate_params():
     """
     params = {}
 
-    params["episodes"] = 5000
+    params["episodes"] = 200000
     params["epochs"] = 5
     params["stack_size"] = 4
     params["skip_frames"] = 4
@@ -19,8 +19,8 @@ def generate_params():
     params["device"] = "cpu"
     params["load_model"] = False
     params["gamma"] = 0.99
-    params["eps_start"] = 0.95
-    params["eps_end"] = 0.05
+    params["eps_start"] = 1.0
+    params["eps_end"] = 0.1
     params["eps_decay"] = 200
 
     return params

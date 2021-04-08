@@ -20,12 +20,8 @@ Transition = namedtuple("Transition", ("state", "action", "next_state", "reward"
 
 def init_weights(m):
     if type(m) == torch.nn.Linear:
-        torch.nn.init.kaiming_uniform(m.weight)
+        torch.nn.init.kaiming_uniform_(m.weight)
         m.bias.data.fill_(0.01)
-
-
-# net = nn.Sequential(nn.Linear(2, 2), nn.Linear(2, 2))
-# net.apply(init_weights)
 
 
 class Trainer:
@@ -67,13 +63,18 @@ class Trainer:
 
         self.writer = SummaryWriter()
 
+        self.steps = 0
+        self.learning_steps = 0
+        self.epsilon = self.params["eps_start"]
+        self.epsilon_start = self.params["eps_start"]
+
     @torch.enable_grad()
     def train(self):
         """Run a single epoch of training."""
         self.target_net.eval()
 
         frames = 0
-        steps = 0
+        self.steps = 0
 
         if self.params["load_model"]:
             self.pred_net.load_state_dict(
@@ -83,7 +84,9 @@ class Trainer:
                 torch.load("model.pk", map_location=torch.device(self.params["device"]))
             )
 
-        for episode in tqdm(range(self.params["episodes"]), desc="episodes", unit="episodes"):
+        pbar = tqdm(range(self.params["episodes"]), unit="episodes")
+        for episode in pbar:
+            pbar.set_description("episode: {} ls: {}".format(episode, self.learning_steps))
 
             done = False
             self.env.reset()
@@ -145,18 +148,13 @@ class Trainer:
                     # if we can select action using frame stack
                     if len(self.frame_stack) == 4:
                         action = self.select_action(
-                            torch.cat(tuple(self.frame_stack)), steps, self.num_actions
+                            torch.cat(tuple(self.frame_stack)), self.num_actions
                         ).item()
-                        steps += 1
+                        self.steps += 1
 
-                    # optimize network every 100 timesteps
-                    if steps % 4 == 0:
-                        # self.optimize_dqn()
-                        # self.train_dqn()
-                        # return
-                        # self.writer.add_scalar("loss", self.losses.avg)
+                    self.train_dqn()
 
-                    if steps % 2000 == 0:
+                    if self.steps % 200 == 0:
                         self.target_net.load_state_dict(self.pred_net.state_dict())
                         torch.save(self.pred_net.state_dict(), "model.pk")
 
@@ -259,7 +257,7 @@ class Trainer:
         # return the transformed image
         return transform(observation)
 
-    def select_action(self, state, timesteps, num_actions):
+    def select_action(self, state, num_actions):
         """
         Select_action uses a epsilon greedy method to select and action.
         This involves both greedy action selection and random action
@@ -267,12 +265,10 @@ class Trainer:
         """
         # threshold for exploration
         sample = random.random()
-        eps_threshold = self.params["eps_end"] + (
-            self.params["eps_start"] - self.params["eps_end"]
-        ) * math.exp(-1.0 * timesteps / self.params["eps_decay"])
 
+        self.epsilon_decay()
         # exploit
-        if sample > eps_threshold:
+        if sample > self.epsilon:
             with torch.no_grad():
                 # choose action with highest q-value
                 state = state.unsqueeze(0).to(self.params["device"])
@@ -281,6 +277,13 @@ class Trainer:
         else:
             return torch.tensor([[random.randrange(num_actions)]], dtype=torch.long)
 
+    def epsilon_decay(self):
+        if self.learning_steps < 100000 or self.learning_steps > 200000:
+            return
+
+        decay_rate = (self.params["eps_start"] - self.params["eps_end"]) / 100000.0
+        self.epsilon = self.params["eps_start"] - decay_rate * self.learning_steps
+
     def train_dqn(self):
         """
         Perform optimization on the DQN given a batch of randomly
@@ -288,8 +291,10 @@ class Trainer:
         """
 
         # need to be able to sample
-        if len(self.replay_memory) < self.params["batch_size"]:
+        if len(self.replay_memory) < self.replay_memory.max_size:
             return
+
+        self.learning_steps += 1
 
         batch = self.replay_memory.sample(self.params["batch_size"])
 
@@ -325,7 +330,7 @@ class Trainer:
 
         huber_loss.backward()
 
-        # # gradient clipping
+        # gradient clipping
         torch.nn.utils.clip_grad_norm_(self.pred_net.parameters(), 1)
 
         self.optimizer.step()
