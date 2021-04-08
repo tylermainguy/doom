@@ -105,7 +105,7 @@ class Trainer:
                 observation, reward, done, _ = self.env.step(action)
 
                 if action == 2 and reward < 0:
-                    reward = -6.0
+                    reward = -10.0
                 skipped_rewards += reward
 
                 # only want to stack every four frames
@@ -182,7 +182,6 @@ class Trainer:
 
             # For frame skipping
             num_skipped = 0
-            skipped_reward = 0
 
             action = self.env.action_space.sample()
 
@@ -191,8 +190,6 @@ class Trainer:
             while not done:
                 self.env.render()
                 observation, reward, done, _ = self.env.step(action)
-
-                skipped_reward += reward
 
                 # only want to stack every four frames
                 if num_skipped == self.params["skip_frames"] - 1:
@@ -208,9 +205,7 @@ class Trainer:
                     else:
                         curr_size = 0
 
-                    skipped_reward = float(skipped_reward) / self.params["skip_frames"]
                     self.update_stack(observation)
-                    skipped_reward = 0
 
                     if not done:
                         updated_stack = torch.cat(tuple(self.frame_stack), axis=0)
@@ -221,7 +216,7 @@ class Trainer:
                     # if we can select action using frame stack
                     if len(self.frame_stack) == 4:
                         action = self.select_action(
-                            torch.cat(tuple(self.frame_stack)), steps, self.num_actions
+                            torch.cat(tuple(self.frame_stack)), self.num_actions
                         ).item()
                         steps += 1
 
