@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -8,30 +9,21 @@ class DQN(nn.Module):
     def __init__(self, height, width, in_channels=4, num_actions=20):
         super(DQN, self).__init__()
         self.conv1 = nn.Conv2d(in_channels, out_channels=32, kernel_size=7)
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=5)
-        self.conv3 = nn.Conv2d(64, 64, kernel_size=3)
+        self.pool1 = nn.MaxPool2d(kernel_size=2)
+        self.conv2 = nn.Conv2d(32, out_channels=32, kernel_size=4)
+        self.pool2 = nn.MaxPool2d(kernel_size=2)
 
-        # calculate size of output after convolutional layers
-        def conv2d_size_out(size, kernel_size=3, stride=1):
-            return (size - (kernel_size - 1) - 1) // stride + 1
-
-        convw = conv2d_size_out(
-            conv2d_size_out(
-                conv2d_size_out(width, kernel_size=7, stride=1), kernel_size=5, stride=1
-            )
-        )
-        convh = conv2d_size_out(
-            conv2d_size_out(
-                conv2d_size_out(height, kernel_size=7, stride=1), kernel_size=5, stride=1
-            )
-        )
-
-        self.fc4 = nn.Linear(convw * convh * 64, num_actions)  # num actions = 20
+        self.fc1 = nn.Linear(32 * 12 * 17, 800)
+        self.fc2 = nn.Linear(800, num_actions)
 
     def forward(self, x):
         """Forward pass."""
-        x = F.relu(self.conv1(x))
-        x = F.relu(self.conv2(x))
-        x = F.relu(self.conv3(x))
+        x = F.relu(self.pool1(self.conv1(x)))
+        x = F.relu(self.pool2(self.conv2(x)))
 
-        return self.fc4(x.view(x.size(0), -1))
+        # flatten
+        x = x.view(x.size(0), -1)
+
+        x = F.leaky_relu(self.fc1(x))
+
+        return self.fc2(x)

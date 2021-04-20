@@ -1,11 +1,14 @@
-##Imports
+"""
+Main module for training and evaluating our DQN agent in the doom environment.
+"""
+
 import numpy as np
 import torch
 
 from trainer import Trainer
 
 
-def generate_params():
+def generate_params() -> dict:
     """
     Generate parameters to be used by model.
     """
@@ -36,8 +39,10 @@ def main():
 
     params = generate_params()
 
+    # use GPUs when available
     if torch.cuda.is_available():
         params["device"] = "cuda"
+
     trainer = Trainer(params)
 
     trainer.train()
