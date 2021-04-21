@@ -32,52 +32,68 @@ class Trainer:
         self.params = params
 
         # Initialize the environment
-        self.env = gym.make("VizdoomBasic-v0")
+        self.env = gym.make(params["env_name"])
         self.num_actions = self.env.action_space.n
 
         # Intitialize both deep Q networks
         self.target_net = DQN(60, 80, num_actions=self.num_actions)
         self.pred_net = DQN(60, 80, num_actions=self.num_actions)
 
-        self.pred_net.apply(init_weights)
-
         # Create env, initialize the starting state
         self.target_net.load_state_dict(self.pred_net.state_dict())
         self.target_net.eval()
 
         # Initialize optimizer
-        self.optimizer = torch.optim.Adam(self.pred_net.parameters())
+        self.optimizer = torch.optim.Adam(self.pred_net.parameters(), lr=3e-5)
 
         if self.params["load_model"]:
-            self.pred_net.load_state_dict(
-                torch.load("model.pk", map_location=torch.device(self.params["device"]))
+            checkpoint = torch.load(
+                "full_model.pk", map_location=torch.device(self.params["device"])
             )
-            self.target_net.load_state_dict(
-                torch.load("model.pk", map_location=torch.device(self.params["device"]))
+
+            self.pred_net.load_state_dict(checkpoint["model_state_dict"])
+
+            self.optimizer.load_state_dict(
+                checkpoint["optimizer_state_dict"],
             )
+
+            self.replay_memory = checkpoint["replay_memory"]
+            self.steps = checkpoint["steps"]
+            self.learning_steps = checkpoint["learning_steps"]
+            self.losses = checkpoint["losses"]
+            self.frame_stack = checkpoint["frame_stack"]
+            self.params = checkpoint["params"]
+            self.episode = checkpoint["episode"]
+            self.epsilon = checkpoint["epsilon"]
+        else:
+            self.pred_net.apply(init_weights)
+
+            # Initialize replay memory
+            self.replay_memory = ReplayMemory(10000)
+
+            # Initialize frame stack
+            self.stack_size = self.params["stack_size"]
+            self.frame_stack = deque(maxlen=self.stack_size)
+
+            # track steps for target network update control
+            self.steps = 0
+            self.learning_steps = 0
+
+            # loss logs
+            self.losses = AverageMeter()
+
+            self.episode = 0
+
+            # epsilon decay parameters
+            self.epsilon = self.params["eps_start"]
 
         # move models to GPU
         if self.params["device"] == "cuda":
             self.target_net = self.target_net.to(self.params["device"])
             self.pred_net = self.pred_net.to(self.params["device"])
 
-        # Initialize replay memory
-        self.replay_memory = ReplayMemory(50000)
-
-        # Initialize frame stack
-        self.stack_size = params["stack_size"]
-        self.frame_stack = deque(maxlen=self.stack_size)
-
-        # epsilon decay parameters
-        self.epsilon = self.params["eps_start"]
         self.epsilon_start = self.params["eps_start"]
 
-        # track steps for target network update control
-        self.steps = 0
-        self.learning_steps = 0
-
-        # loss logs
-        self.losses = AverageMeter()
         self.writer = SummaryWriter()
 
     def reset_stack(self):
@@ -161,7 +177,7 @@ class Trainer:
         """
 
         # wait until replay buffer full before starting model training
-        if len(self.replay_memory) < self.replay_memory.max_size:
+        if len(self.replay_memory) < self.params["batch_size"] * 2:
             return
 
         self.learning_steps += 1
@@ -174,7 +190,8 @@ class Trainer:
 
         # can't transition to None (termination)
         non_terminating_filter = torch.tensor(
-            tuple(map(lambda s: s is not None, new_states)), device=self.params["device"],
+            tuple(map(lambda s: s is not None, new_states)),
+            device=self.params["device"],
         )
         non_terminating = torch.stack([s for s in new_states if s is not None]).to(
             self.params["device"]
@@ -218,7 +235,7 @@ class Trainer:
         self.steps = 0
 
         # tqdm is a cool thing
-        pbar = tqdm(range(self.params["episodes"]), unit="episodes")
+        pbar = tqdm(range(self.episode, self.params["episodes"]), unit="episodes")
         for episode in pbar:
             pbar.set_description("epsilon: {} ls: {}".format(self.epsilon, self.learning_steps))
 
@@ -243,7 +260,11 @@ class Trainer:
 
                 # missed shot
                 if action == 2 and reward < 0:
-                    reward = -10.0
+                    reward = -5.0
+
+                # any other action should just be -1.0
+                elif reward < 0:
+                    reward = -1.0
 
                 skipped_rewards += reward
 
@@ -297,9 +318,28 @@ class Trainer:
                     self.train_dqn()
 
                     # target network updates
-                    if self.steps % 200 == 0:
+                    if self.steps % 2 == 0:
                         self.target_net.load_state_dict(self.pred_net.state_dict())
+
                         torch.save(self.pred_net.state_dict(), "model.pk")
+
+                    if self.learning_steps % 10000 == 0:
+                        # save full model in case of restart
+                        torch.save(
+                            {
+                                "episode": episode,
+                                "steps": self.steps,
+                                "learning_steps": self.learning_steps,
+                                "model_state_dict": self.pred_net.state_dict(),
+                                "optimizer_state_dict": self.optimizer.state_dict(),
+                                "replay_memory": self.replay_memory,
+                                "losses": self.losses,
+                                "params": self.params,
+                                "frame_stack": self.frame_stack,
+                                "epsilon": self.epsilon,
+                            },
+                            "full_model.pk",
+                        )
 
                 else:
                     num_skipped += 1

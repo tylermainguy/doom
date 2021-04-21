@@ -25,6 +25,7 @@ def generate_params() -> dict:
     params["eps_start"] = 1.0
     params["eps_end"] = 0.1
     params["eps_decay"] = 200
+    params["env_name"] = "VizdoomBasic-v0"
 
     return params
 
