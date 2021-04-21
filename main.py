@@ -10,7 +10,7 @@ from trainer import Trainer
 
 def generate_params() -> dict:
     """
-    Generate parameters to be used by model.
+    Generate parameters to be used by the model.
     """
     params = {}
 
@@ -20,7 +20,7 @@ def generate_params() -> dict:
     params["skip_frames"] = 4
     params["batch_size"] = 40
     params["device"] = "cpu"
-    params["load_model"] = False
+    params["load_model"] = True
     params["gamma"] = 0.99
     params["eps_start"] = 1.0
     params["eps_end"] = 0.1

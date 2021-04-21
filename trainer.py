@@ -27,7 +27,7 @@ def init_weights(m):
 class Trainer:
     """Train DQN model."""
 
-    def __init__(self, params):
+    def __init__(self, params: dict):
 
         self.params = params
 
@@ -65,6 +65,7 @@ class Trainer:
             self.params = checkpoint["params"]
             self.episode = checkpoint["episode"]
             self.epsilon = checkpoint["epsilon"]
+            self.stack_size = self.params["stack_size"]
         else:
             self.pred_net.apply(init_weights)
 
@@ -89,6 +90,7 @@ class Trainer:
 
         # move models to GPU
         if self.params["device"] == "cuda":
+            print("GPU!")
             self.target_net = self.target_net.to(self.params["device"])
             self.pred_net = self.pred_net.to(self.params["device"])
 
@@ -116,7 +118,20 @@ class Trainer:
         This function will take a screen grab of the current time step of the game
         and transform it from a RGB image to greyscale, while resizing the height
         and width.
+
+        Parameters
+        ----------
+        observation : np.ndarray
+            RGB image (buffer) from DOOM env.
+
+
+        Returns
+        ----------
+        Tensor
+            Scaled down and grayscaled version of buffer image.
+
         """
+
         # convert to grayscale, and reshape to be quarter of original size
         transform = transforms.Compose(
             [transforms.ToTensor(), transforms.Grayscale(), transforms.Resize((60, 80))]
@@ -128,7 +143,7 @@ class Trainer:
     def epsilon_decay(self):
         """Calculate decay of epsilon value over time."""
 
-        # decay from 1.0 to 0.1 over 100,000 -> 300,000
+        # only decay between [100,000, 300,000]
         if self.learning_steps < 100000 or self.learning_steps > 300000:
             return
 
@@ -193,14 +208,14 @@ class Trainer:
             tuple(map(lambda s: s is not None, new_states)),
             device=self.params["device"],
         )
-        non_terminating = torch.stack([s for s in new_states if s is not None]).to(
-            self.params["device"]
+        non_terminating = torch.stack(
+            [s.to(self.params["device"]) for s in new_states if s is not None]
         )
 
         # extract states, actions and rewards
-        states = torch.stack([x[0] for x in batch]).to(self.params["device"])
-        actions = torch.stack([x[1] for x in batch]).to(self.params["device"])
-        rewards = torch.stack([x[3] for x in batch]).to(self.params["device"])
+        states = torch.stack([x[0].to(self.params["device"]) for x in batch])
+        actions = torch.stack([x[1].to(self.params["device"]) for x in batch])
+        rewards = torch.stack([x[3].to(self.params["device"]) for x in batch])
 
         # run prediction without gradients
         with torch.no_grad():
@@ -228,11 +243,12 @@ class Trainer:
         # backprop
         self.optimizer.step()
 
-    @torch.enable_grad()
     def train(self):
         """Run a single epoch of training."""
 
         self.steps = 0
+        self.pred_net.train()
+        self.target_net.eval()
 
         # tqdm is a cool thing
         pbar = tqdm(range(self.episode, self.params["episodes"]), unit="episodes")
@@ -320,6 +336,7 @@ class Trainer:
                     # target network updates
                     if self.steps % 2 == 0:
                         self.target_net.load_state_dict(self.pred_net.state_dict())
+                        self.target_net.eval()
 
                         torch.save(self.pred_net.state_dict(), "model.pk")
 
@@ -344,20 +361,20 @@ class Trainer:
                 else:
                     num_skipped += 1
 
-            self.writer.add_scalar("AvgReward", episode_sum / episode_steps, episode)
+            self.writer.add_scalar("Average Reward", episode_sum / episode_steps, episode)
 
         self.env.close()
 
-    @torch.no_grad()
     def evaluate(self):
-        """Visually evaluate models performance."""
+        """
+        Visually evalate model performance by having it follow a greedy
+        policy defined by the DQN.
+        """
 
-        self.pred_net.load_state_dict(
-            torch.load("model.pk", map_location=torch.device(self.params["device"]))
-        )
         self.target_net.load_state_dict(
             torch.load("model.pk", map_location=torch.device(self.params["device"]))
         )
+        self.target_net.eval()
 
         steps = 0
         for episode in tqdm(range(self.params["episodes"]), desc="episodes", unit="episodes"):
@@ -405,7 +422,6 @@ class Trainer:
                         action = self.select_action(
                             torch.cat(tuple(self.frame_stack)), self.num_actions
                         ).item()
-                        steps += 1
 
                 else:
                     num_skipped += 1
