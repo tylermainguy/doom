@@ -38,8 +38,10 @@ class Trainer:
         self.num_actions = self.env.action_space.n
 
         # Intitialize both deep Q networks
-        self.target_net = DQN(60, 80, num_actions=self.num_actions)
-        self.pred_net = DQN(60, 80, num_actions=self.num_actions)
+        self.target_net = DQN(60, 80, num_actions=self.num_actions).to(self.params["device"])
+        self.pred_net = DQN(60, 80, num_actions=self.num_actions).to(self.params["device"])
+
+        self.optimizer = torch.optim.Adam(self.pred_net.parameters(), lr=2e-5)
 
         # load a pretrained model
         if self.params["load_model"]:
@@ -59,6 +61,8 @@ class Trainer:
             self.losses = checkpoint["losses"]
             self.frame_stack = checkpoint["frame_stack"]
             self.params = checkpoint["params"]
+            self.params["start_decay"] = params["start_decay"]
+            self.params["end_decay"] = params["end_decay"]
             self.episode = checkpoint["episode"]
             self.epsilon = checkpoint["epsilon"]
             self.stack_size = self.params["stack_size"]
@@ -90,8 +94,6 @@ class Trainer:
         # set target network to prediction network
         self.target_net.load_state_dict(self.pred_net.state_dict())
         self.target_net.eval()
-
-        self.optimizer = torch.optim.Adam(self.pred_net.parameters(), lr=2e-5)
 
         # move models to GPU
         if self.params["device"] == "cuda:0":
@@ -152,14 +154,17 @@ class Trainer:
         """Calculate decay of epsilon value over time."""
 
         # only decay between [100,000, 300,000]
-        if self.steps < self.params["start_decay"] or self.steps > self.params["end_decay"]:
+        if (
+            self.learning_steps < self.params["start_decay"]
+            or self.learning_steps > self.params["end_decay"]
+        ):
             return
 
         decay_rate = (self.params["eps_start"] - self.params["eps_end"]) / (
             self.params["end_decay"] - self.params["start_decay"]
         )
         self.epsilon = self.params["eps_start"] - (
-            decay_rate * (self.steps - self.params["start_decay"])
+            decay_rate * (self.learning_steps - self.params["start_decay"])
         )
 
     def select_action(self, state: Tensor, num_actions: int) -> Tensor:
@@ -262,12 +267,14 @@ class Trainer:
             tuple(map(lambda s: s is not None, new_states)),
             device=self.params["device"],
         )
-        non_terminating = torch.stack([s for s in new_states if s is not None])
+        non_terminating = torch.stack([s for s in new_states if s is not None]).to(
+            self.params["device"]
+        )
 
         # extract states, actions and rewards
-        states = torch.stack([x[0] for x in batch])
-        actions = torch.stack([x[1] for x in batch])
-        rewards = torch.stack([x[3] for x in batch])
+        states = torch.stack([x[0] for x in batch]).to(self.params["device"])
+        actions = torch.stack([x[1] for x in batch]).to(self.params["device"])
+        rewards = torch.stack([x[3] for x in batch]).to(self.params["device"])
 
         # network predictions
         predicted = self.pred_net(states)
@@ -383,7 +390,10 @@ class Trainer:
 
                     # if we can select action using frame stack
                     if len(self.frame_stack) == 4:
-                        action = self.select_action(updated_stack, self.num_actions)
+                        action = self.select_action(
+                            torch.cat(tuple(self.frame_stack), axis=0).to(self.params["device"]),
+                            self.num_actions,
+                        )
                         self.steps += 1
 
                     self.train_dqn()
