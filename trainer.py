@@ -382,10 +382,10 @@ class Trainer:
         policy defined by the DQN.
         """
 
-        self.target_net.load_state_dict(
+        self.pred_net.load_state_dict(
             torch.load("model.pk", map_location=torch.device(self.params["device"]))
         )
-        self.target_net.eval()
+        self.pred_net.eval()
 
         steps = 0
         for episode in tqdm(range(self.params["episodes"]), desc="episodes", unit="episodes"):
