@@ -11,6 +11,12 @@ from trainer import Trainer
 def generate_params() -> dict:
     """
     Generate parameters to be used by the model.
+
+    Returns
+    ----------
+    dict
+        Mapping for model parameters and values.
+
     """
     params = {}
 
@@ -24,6 +30,8 @@ def generate_params() -> dict:
     params["gamma"] = 0.99
     params["eps_start"] = 1.0
     params["eps_end"] = 0.1
+    params["start_decay"] = 100000
+    params["end_decay"] = 300000
     params["eps_decay"] = 200
     params["env_name"] = "VizdoomBasic-v0"
 

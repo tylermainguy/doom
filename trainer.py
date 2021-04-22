@@ -1,3 +1,5 @@
+"""Module for training and evaluating DQN in DOOM."""
+
 import math
 import random
 from collections import deque, namedtuple
@@ -39,6 +41,7 @@ class Trainer:
         self.target_net = DQN(60, 80, num_actions=self.num_actions)
         self.pred_net = DQN(60, 80, num_actions=self.num_actions)
 
+        # load a pretrained model
         if self.params["load_model"]:
             checkpoint = torch.load(
                 "full_model.pk", map_location=torch.device(self.params["device"])
@@ -59,13 +62,16 @@ class Trainer:
             self.episode = checkpoint["episode"]
             self.epsilon = checkpoint["epsilon"]
             self.stack_size = self.params["stack_size"]
+
+        # training from scratch
         else:
+            # weight init
             self.pred_net.apply(init_weights)
 
-            # Initialize replay memory
+            # init replay memory
             self.replay_memory = ReplayMemory(10000)
 
-            # Initialize frame stack
+            # init frame stack
             self.stack_size = self.params["stack_size"]
             self.frame_stack = deque(maxlen=self.stack_size)
 
@@ -81,24 +87,26 @@ class Trainer:
             # epsilon decay parameters
             self.epsilon = self.params["eps_start"]
 
-        # Create env, initialize the starting state
+        # set target network to prediction network
         self.target_net.load_state_dict(self.pred_net.state_dict())
         self.target_net.eval()
 
-        # Initialize optimizer
-        self.optimizer = torch.optim.Adam(self.pred_net.parameters(), lr=1e-3)
+        self.optimizer = torch.optim.Adam(self.pred_net.parameters(), lr=2e-5)
 
         # move models to GPU
         if self.params["device"] == "cuda:0":
             self.target_net = self.target_net.to(self.params["device"])
             self.pred_net = self.pred_net.to(self.params["device"])
 
+        # epsilon decay
         self.epsilon_start = self.params["eps_start"]
 
+        # tensorboard
         self.writer = SummaryWriter()
 
     def reset_stack(self):
         """reset frame stack."""
+
         self.frame_stack = deque(maxlen=self.stack_size)
 
     def update_stack(self, observation: Tensor):
@@ -107,6 +115,7 @@ class Trainer:
         This function will create stacks of four consequtive
         images for the model to learn from.
         """
+
         image = self.preprocess(observation)
 
         self.frame_stack.append(image)
@@ -143,11 +152,15 @@ class Trainer:
         """Calculate decay of epsilon value over time."""
 
         # only decay between [100,000, 300,000]
-        if self.learning_steps < 100000 or self.learning_steps > 300000:
+        if self.steps < self.params["start_decay"] or self.steps > self.params["end_decay"]:
             return
 
-        decay_rate = (self.params["eps_start"] - self.params["eps_end"]) / 200000
-        self.epsilon = self.params["eps_start"] - (decay_rate * (self.learning_steps - 100000))
+        decay_rate = (self.params["eps_start"] - self.params["eps_end"]) / (
+            self.params["end_decay"] - self.params["start_decay"]
+        )
+        self.epsilon = self.params["eps_start"] - (
+            decay_rate * (self.steps - self.params["start_decay"])
+        )
 
     def select_action(self, state: Tensor, num_actions: int) -> Tensor:
         """
@@ -187,9 +200,25 @@ class Trainer:
                 [random.randrange(num_actions)], dtype=torch.long, device=self.params["device"]
             )
 
-    def shape_reward(self, reward, action, done):
+    def shape_reward(self, reward: int, action: int, done: bool) -> int:
         """
         Shape the reward returned by environment to facilitate faster learning.
+        Large values provided by VizDoom destabilize learning.
+
+        Parameters
+        ----------
+        reward : int
+            Reward from environment.
+        action : int
+            Value corresponding to agent action.
+        done : bool
+            Boolean indicating episode end.
+
+        Returns
+        ----------
+        int
+            Reshaped reward value
+
         """
 
         # missed shot
@@ -240,9 +269,11 @@ class Trainer:
         actions = torch.stack([x[1] for x in batch])
         rewards = torch.stack([x[3] for x in batch])
 
+        # network predictions
         predicted = self.pred_net(states)
         action_val = predicted.gather(1, actions)
 
+        # init 0 for terminal transitions
         target_vals = torch.zeros(self.params["batch_size"], device=self.params["device"])
 
         # calculate maximum action for new states
@@ -252,6 +283,7 @@ class Trainer:
 
         target_vals = target_vals.unsqueeze(1)
 
+        # target for TD error
         target_update = (self.params["gamma"] * target_vals) + rewards
 
         # huber loss for TD error
@@ -261,11 +293,9 @@ class Trainer:
         self.optimizer.zero_grad()
         huber_loss.backward()
 
+        # gradient clipping for stability
         for param in self.pred_net.parameters():
             param.grad.data.clamp_(-1, 1)
-
-        # # gradient clipping
-        # torch.nn.utils.clip_grad_norm_(self.pred_net.parameters(), 1)
 
         # backprop
         self.optimizer.step()
@@ -280,7 +310,10 @@ class Trainer:
         # tqdm is a cool thing
         pbar = tqdm(range(self.episode, self.params["episodes"]), unit="episodes")
         for episode in pbar:
-            pbar.set_description("epsilon: {} ls: {}".format(self.epsilon, self.learning_steps))
+            # tracking number of steps
+            pbar.set_description(
+                "eps: {} ls: {}, steps: {}".format(self.epsilon, self.learning_steps, self.steps)
+            )
 
             episode_steps = 0
             episode_sum = 0
@@ -298,11 +331,13 @@ class Trainer:
 
             # until episode termination
             while not done:
+                # take action
                 action_val = action.detach().clone().item()
                 observation, reward, done, _ = self.env.step(action_val)
 
-                reward = self.shape_reward(reward, action, done)
+                reward = self.shape_reward(reward, action_val, done)
 
+                # cumulative sum of skipped frame rewards
                 skipped_rewards += reward
 
                 episode_sum += reward
@@ -326,6 +361,7 @@ class Trainer:
 
                     self.update_stack(observation)
 
+                    # frame stack
                     if not done:
                         updated_stack = torch.cat(tuple(self.frame_stack), axis=0).to(
                             self.params["device"]
@@ -353,10 +389,11 @@ class Trainer:
                     self.train_dqn()
 
                     # update target network
-                    if self.learning_steps % 2000 == 0:
+                    if self.steps % 2000 == 0:
                         self.target_net.load_state_dict(self.pred_net.state_dict())
                         self.target_net.eval()
 
+                    # full parameter saving (expensive)
                     if self.learning_steps > 0 and self.learning_steps % 10000 == 0:
 
                         torch.save(self.pred_net.state_dict(), "model.pk")
