@@ -18,9 +18,9 @@ def generate_params() -> dict:
     params["epochs"] = 5
     params["stack_size"] = 4
     params["skip_frames"] = 4
-    params["batch_size"] = 40
+    params["batch_size"] = 64
     params["device"] = "cpu"
-    params["load_model"] = True
+    params["load_model"] = False
     params["gamma"] = 0.99
     params["eps_start"] = 1.0
     params["eps_end"] = 0.1

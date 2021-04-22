@@ -44,7 +44,7 @@ class Trainer:
         self.target_net.eval()
 
         # Initialize optimizer
-        self.optimizer = torch.optim.Adam(self.pred_net.parameters(), lr=3e-5)
+        self.optimizer = torch.optim.Adam(self.pred_net.parameters())
 
         if self.params["load_model"]:
             checkpoint = torch.load(
@@ -90,7 +90,6 @@ class Trainer:
 
         # move models to GPU
         if self.params["device"] == "cuda":
-            print("GPU!")
             self.target_net = self.target_net.to(self.params["device"])
             self.pred_net = self.pred_net.to(self.params["device"])
 
@@ -185,6 +184,29 @@ class Trainer:
             # select randomly from set of actions
             return torch.tensor([[random.randrange(num_actions)]], dtype=torch.long)
 
+    def shape_reward(self, reward, action, done):
+        """
+        Shape the reward returned by environment to facilitate faster learning.
+        """
+
+        # missed shot
+        if action == 2 and reward < 0:
+            reward = -0.1
+
+        # terminal state
+        elif done:
+            reward = 0
+
+        # movement is small negative
+        elif reward < 0:
+            reward = -0.01
+
+        # shot hit
+        elif reward > 0:
+            reward = 1.0
+
+        return reward
+
     def train_dqn(self):
         """
         Perform optimization on the DQN given a batch of randomly
@@ -192,7 +214,7 @@ class Trainer:
         """
 
         # wait until replay buffer full before starting model training
-        if len(self.replay_memory) < self.params["batch_size"] * 2:
+        if len(self.replay_memory) < 5000:
             return
 
         self.learning_steps += 1
@@ -271,16 +293,9 @@ class Trainer:
 
             # until episode termination
             while not done:
-                self.env.render()
                 observation, reward, done, _ = self.env.step(action)
 
-                # missed shot
-                if action == 2 and reward < 0:
-                    reward = -5.0
-
-                # any other action should just be -1.0
-                elif reward < 0:
-                    reward = -1.0
+                reward = self.shape_reward(reward, action, done)
 
                 skipped_rewards += reward
 
@@ -288,13 +303,10 @@ class Trainer:
                 episode_steps += 1
 
                 # only want to stack every four frames
-                if num_skipped == self.params["skip_frames"] - 1:
+                if num_skipped == self.params["skip_frames"] or reward > 0 or done:
 
                     # reset counter
                     num_skipped = 0
-
-                    # want average reward over skipped frames
-                    skipped_rewards = float(skipped_rewards) / self.params["skip_frames"]
 
                     # get old stack, and update stack with current observation
                     if len(self.frame_stack) > 0:
@@ -326,21 +338,20 @@ class Trainer:
 
                     # if we can select action using frame stack
                     if len(self.frame_stack) == 4:
-                        action = self.select_action(
-                            torch.cat(tuple(self.frame_stack)), self.num_actions
-                        ).item()
+                        action = self.select_action(updated_stack, self.num_actions).item()
                         self.steps += 1
 
                     self.train_dqn()
 
-                    # target network updates
-                    if self.steps % 2 == 0:
+                    # update target network
+                    if self.learning_steps % 10000 == 0:
                         self.target_net.load_state_dict(self.pred_net.state_dict())
                         self.target_net.eval()
 
+                    if self.learning_steps > 0 and self.learning_steps % 10000 == 0:
+
                         torch.save(self.pred_net.state_dict(), "model.pk")
 
-                    if self.learning_steps % 10000 == 0:
                         # save full model in case of restart
                         torch.save(
                             {
