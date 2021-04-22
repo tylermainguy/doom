@@ -42,7 +42,7 @@ def main():
 
     # use GPUs when available
     if torch.cuda.is_available():
-        params["device"] = "cuda"
+        params["device"] = "cuda:0"
 
     trainer = Trainer(params)
 

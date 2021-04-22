@@ -39,13 +39,6 @@ class Trainer:
         self.target_net = DQN(60, 80, num_actions=self.num_actions)
         self.pred_net = DQN(60, 80, num_actions=self.num_actions)
 
-        # Create env, initialize the starting state
-        self.target_net.load_state_dict(self.pred_net.state_dict())
-        self.target_net.eval()
-
-        # Initialize optimizer
-        self.optimizer = torch.optim.Adam(self.pred_net.parameters())
-
         if self.params["load_model"]:
             checkpoint = torch.load(
                 "full_model.pk", map_location=torch.device(self.params["device"])
@@ -88,8 +81,15 @@ class Trainer:
             # epsilon decay parameters
             self.epsilon = self.params["eps_start"]
 
+        # Create env, initialize the starting state
+        self.target_net.load_state_dict(self.pred_net.state_dict())
+        self.target_net.eval()
+
+        # Initialize optimizer
+        self.optimizer = torch.optim.Adam(self.pred_net.parameters(), lr=1e-3)
+
         # move models to GPU
-        if self.params["device"] == "cuda":
+        if self.params["device"] == "cuda:0":
             self.target_net = self.target_net.to(self.params["device"])
             self.pred_net = self.pred_net.to(self.params["device"])
 
@@ -178,11 +178,14 @@ class Trainer:
             with torch.no_grad():
                 # choose action with highest q-value
                 state = state.unsqueeze(0).to(self.params["device"])
-                return self.pred_net(state).max(1)[1].view(1, 1)
+                return self.pred_net(state).max(1)[1]
+
         # explore
         else:
             # select randomly from set of actions
-            return torch.tensor([[random.randrange(num_actions)]], dtype=torch.long)
+            return torch.tensor(
+                [random.randrange(num_actions)], dtype=torch.long, device=self.params["device"]
+            )
 
     def shape_reward(self, reward, action, done):
         """
@@ -230,24 +233,23 @@ class Trainer:
             tuple(map(lambda s: s is not None, new_states)),
             device=self.params["device"],
         )
-        non_terminating = torch.stack(
-            [s.to(self.params["device"]) for s in new_states if s is not None]
-        )
+        non_terminating = torch.stack([s for s in new_states if s is not None])
 
         # extract states, actions and rewards
-        states = torch.stack([x[0].to(self.params["device"]) for x in batch])
-        actions = torch.stack([x[1].to(self.params["device"]) for x in batch])
-        rewards = torch.stack([x[3].to(self.params["device"]) for x in batch])
+        states = torch.stack([x[0] for x in batch])
+        actions = torch.stack([x[1] for x in batch])
+        rewards = torch.stack([x[3] for x in batch])
 
-        # run prediction without gradients
-        with torch.no_grad():
-            predicted = self.pred_net(states)
-            action_val = predicted.gather(1, actions)
+        predicted = self.pred_net(states)
+        action_val = predicted.gather(1, actions)
 
         target_vals = torch.zeros(self.params["batch_size"], device=self.params["device"])
 
         # calculate maximum action for new states
-        target_vals[non_terminating_filter] = self.target_net(non_terminating).max(dim=1)[0]
+        target_vals[non_terminating_filter] = (
+            self.target_net(non_terminating).max(dim=1)[0]
+        ).detach()
+
         target_vals = target_vals.unsqueeze(1)
 
         target_update = (self.params["gamma"] * target_vals) + rewards
@@ -259,8 +261,11 @@ class Trainer:
         self.optimizer.zero_grad()
         huber_loss.backward()
 
-        # gradient clipping
-        torch.nn.utils.clip_grad_norm_(self.pred_net.parameters(), 1)
+        for param in self.pred_net.parameters():
+            param.grad.data.clamp_(-1, 1)
+
+        # # gradient clipping
+        # torch.nn.utils.clip_grad_norm_(self.pred_net.parameters(), 1)
 
         # backprop
         self.optimizer.step()
@@ -287,13 +292,14 @@ class Trainer:
             skipped_rewards = 0
 
             # first action selected randomly
-            action = self.env.action_space.sample()
+            action = torch.tensor([self.env.action_space.sample()], device=self.params["device"])
 
             self.reset_stack()
 
             # until episode termination
             while not done:
-                observation, reward, done, _ = self.env.step(action)
+                action_val = action.detach().clone().item()
+                observation, reward, done, _ = self.env.step(action_val)
 
                 reward = self.shape_reward(reward, action, done)
 
@@ -310,7 +316,9 @@ class Trainer:
 
                     # get old stack, and update stack with current observation
                     if len(self.frame_stack) > 0:
-                        old_stack = torch.cat(tuple(self.frame_stack), axis=0)
+                        old_stack = torch.cat(tuple(self.frame_stack), axis=0).to(
+                            self.params["device"]
+                        )
                         curr_size, _, _ = old_stack.shape
 
                     else:
@@ -319,32 +327,33 @@ class Trainer:
                     self.update_stack(observation)
 
                     if not done:
-                        updated_stack = torch.cat(tuple(self.frame_stack), axis=0)
+                        updated_stack = torch.cat(tuple(self.frame_stack), axis=0).to(
+                            self.params["device"]
+                        )
                     else:
                         # when we've reached a terminal state
                         updated_stack = None
 
                     # need two stacks for transition
                     if curr_size == self.params["stack_size"]:
-
                         self.replay_memory.add_memory(
                             old_stack,
-                            torch.tensor([action]),
+                            action,
                             updated_stack,
-                            torch.tensor([skipped_rewards]),
+                            torch.tensor([skipped_rewards], device=self.params["device"]),
                         )
 
                     skipped_rewards = 0
 
                     # if we can select action using frame stack
                     if len(self.frame_stack) == 4:
-                        action = self.select_action(updated_stack, self.num_actions).item()
+                        action = self.select_action(updated_stack, self.num_actions)
                         self.steps += 1
 
                     self.train_dqn()
 
                     # update target network
-                    if self.learning_steps % 10000 == 0:
+                    if self.learning_steps % 2000 == 0:
                         self.target_net.load_state_dict(self.pred_net.state_dict())
                         self.target_net.eval()
 
@@ -432,7 +441,7 @@ class Trainer:
                     if len(self.frame_stack) == 4:
                         action = self.select_action(
                             torch.cat(tuple(self.frame_stack)), self.num_actions
-                        ).item()
+                        )
 
                 else:
                     num_skipped += 1
