@@ -42,6 +42,9 @@ class Trainer:
         elif self.game == "defend":
             viz_env = "VizdoomBasic-v0"
             self.load_path = "models/defend/"
+        elif self.game == "center":
+            viz_env = "VizdoomDefendCenter-v0"
+            self.load_path = "models/center"
 
         # Initialize the environment
         self.env = gym.make(viz_env)
@@ -256,7 +259,15 @@ class Trainer:
                 reward = 1.0
 
         elif self.game == "health":
-            reward = reward
+            if reward > 0:
+                reward = 0.01
+
+            else:
+                reward = -1.0
+
+        elif self.game == "center":
+            if action == 2 and reward <= 0:
+                reward = -0.1
 
         return reward
 
@@ -276,6 +287,9 @@ class Trainer:
 
         elif self.game == "defend":
             return reward > 0
+
+        elif self.game == "center":
+            return reward == -1.0
 
     def train_dqn(self):
         """
@@ -465,7 +479,7 @@ class Trainer:
         policy defined by the DQN.
         """
 
-        # load pretrainedm model
+        # load pretrained model
         self.pred_net.load_state_dict(
             torch.load(self.load_path + "model.pk", map_location=torch.device(self.device))
         )
