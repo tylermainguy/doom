@@ -3,4 +3,5 @@ scenarios
 _vizdoom.ini
 __pycache__/
 runs/
+models/
 

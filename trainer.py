@@ -471,6 +471,8 @@ class Trainer:
         )
         self.pred_net.eval()
 
+        self.eps = 0.1
+
         steps = 0
         for episode in tqdm(range(self.params.episodes), desc="episodes", unit="episodes"):
 
@@ -505,12 +507,6 @@ class Trainer:
                         curr_size = 0
 
                     self.update_stack(observation)
-
-                    if not done:
-                        updated_stack = torch.cat(tuple(self.frame_stack), axis=0)
-                    else:
-                        # when we've reached a terminal state
-                        updated_stack = None
 
                     # if we can select action using frame stack
                     if len(self.frame_stack) == 4:
