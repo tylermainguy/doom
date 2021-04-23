@@ -18,23 +18,25 @@ pip install -r requirements.txt
 To train the model, run 
 
 ```train
-python train.py
+python main.py
 ```
-Selectable hyperparameters can be read about by running `python train.py --help`
+
+Selectable hyperparameters can be read about by running `python main.py --help`
 
 ## Evaluation
 
 To evaluate the trained model on a given environment, run:
 
 ```eval
-python eval.py --model-file mymodel.pth --benchmark imagenet
+python main.py --eval --game=<gametype>
 ```
+where `gametype` is either `"defend"`, or `"health"`.
 
 ## Pre-trained Models
 
 You can download pretrained models here:
 
-- [My awesome model](https://drive.google.com/mymodel.pth), trained for the different possible environments used in this project.
+- [Pretrained models](https://queensuca-my.sharepoint.com/:f:/g/personal/16tsm_queensu_ca/Ela7AaJUtvZMugjjwWp66T8BvF0FR78FSwccNQNeUJzNUg?e=G5ynLT), each folder corresponds to pretrained models on a given task. Download and place the folder of interest in `models/` for usage.
 
 ## Results
 
