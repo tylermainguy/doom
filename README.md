@@ -5,9 +5,9 @@ Teaching an agent to play DOOM (1993) using deep Q-networks (DQNs).
 
 ## Requirements
 
-To begin, follow all installation instructions for the [OpenAI gym Vizdoom wrapper](https://github.com/shakenes/vizdoomgym.git) for environment setup. 
+To begin, follow all installation instructions for the [OpenAI gym Vizdoom wrapper](https://github.com/shakenes/vizdoomgym.git) for environment setup. Some installations (MacOS) require that you first follow the [build instructions for Vizdoom](https://github.com/mwydmuch/ViZDoom/blob/master/doc/Building.md) before trying the installation for VizdoomGym.
 
-To install requirements for our particular project, run:
+To install requirements particular to our project, run:
 
 ```setup
 pip install -r requirements.txt
