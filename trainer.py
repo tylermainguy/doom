@@ -32,21 +32,32 @@ class Trainer:
     def __init__(self, params: dict):
 
         self.params = params
+        self.device = self.params.device
+
+        self.game = params.game
+
+        if self.game == "health":
+            viz_env = "VizdoomHealthGathering-v0"
+            self.load_path = "models/health/"
+        elif self.game == "defend":
+            viz_env = "VizdoomBasic-v0"
+            self.load_path = "models/defend/"
 
         # Initialize the environment
-        self.env = gym.make(params["env_name"])
+        self.env = gym.make(viz_env)
         self.num_actions = self.env.action_space.n
 
         # Intitialize both deep Q networks
-        self.target_net = DQN(60, 80, num_actions=self.num_actions).to(self.params["device"])
-        self.pred_net = DQN(60, 80, num_actions=self.num_actions).to(self.params["device"])
+        self.target_net = DQN(60, 80, num_actions=self.num_actions).to(self.device)
+        self.pred_net = DQN(60, 80, num_actions=self.num_actions).to(self.device)
 
         self.optimizer = torch.optim.Adam(self.pred_net.parameters(), lr=2e-5)
 
         # load a pretrained model
-        if self.params["load_model"]:
+        if self.params.load_model:
+
             checkpoint = torch.load(
-                "full_model.pk", map_location=torch.device(self.params["device"])
+                self.load_path + "full_model.pk", map_location=torch.device(self.device)
             )
 
             self.pred_net.load_state_dict(checkpoint["model_state_dict"])
@@ -61,11 +72,11 @@ class Trainer:
             self.losses = checkpoint["losses"]
             self.frame_stack = checkpoint["frame_stack"]
             self.params = checkpoint["params"]
-            self.params["start_decay"] = params["start_decay"]
-            self.params["end_decay"] = params["end_decay"]
+            self.params.start_decay = params.start_decay
+            self.params.end_decay = params.end_decay
             self.episode = checkpoint["episode"]
             self.epsilon = checkpoint["epsilon"]
-            self.stack_size = self.params["stack_size"]
+            self.stack_size = self.params.stack_size
 
         # training from scratch
         else:
@@ -76,7 +87,7 @@ class Trainer:
             self.replay_memory = ReplayMemory(10000)
 
             # init frame stack
-            self.stack_size = self.params["stack_size"]
+            self.stack_size = self.params.stack_size
             self.frame_stack = deque(maxlen=self.stack_size)
 
             # track steps for target network update control
@@ -89,19 +100,19 @@ class Trainer:
             self.episode = 0
 
             # epsilon decay parameters
-            self.epsilon = self.params["eps_start"]
+            self.epsilon = self.params.eps_start
 
         # set target network to prediction network
         self.target_net.load_state_dict(self.pred_net.state_dict())
         self.target_net.eval()
 
         # move models to GPU
-        if self.params["device"] == "cuda:0":
-            self.target_net = self.target_net.to(self.params["device"])
-            self.pred_net = self.pred_net.to(self.params["device"])
+        if self.device == "cuda:0":
+            self.target_net = self.target_net.to(self.device)
+            self.pred_net = self.pred_net.to(self.device)
 
         # epsilon decay
-        self.epsilon_start = self.params["eps_start"]
+        self.epsilon_start = self.params.eps_start
 
         # tensorboard
         self.writer = SummaryWriter()
@@ -155,16 +166,16 @@ class Trainer:
 
         # only decay between [100,000, 300,000]
         if (
-            self.learning_steps < self.params["start_decay"]
-            or self.learning_steps > self.params["end_decay"]
+            self.learning_steps < self.params.start_decay
+            or self.learning_steps > self.params.end_decay
         ):
             return
 
-        decay_rate = (self.params["eps_start"] - self.params["eps_end"]) / (
-            self.params["end_decay"] - self.params["start_decay"]
+        decay_rate = (self.params.eps_start - self.params.eps_end) / (
+            self.params.end_decay - self.params.start_decay
         )
-        self.epsilon = self.params["eps_start"] - (
-            decay_rate * (self.learning_steps - self.params["start_decay"])
+        self.epsilon = self.params.eps_start - (
+            decay_rate * (self.learning_steps - self.params.start_decay)
         )
 
     def select_action(self, state: Tensor, num_actions: int) -> Tensor:
@@ -195,14 +206,14 @@ class Trainer:
         if sample > self.epsilon:
             with torch.no_grad():
                 # choose action with highest q-value
-                state = state.unsqueeze(0).to(self.params["device"])
+                state = state.unsqueeze(0).to(self.device)
                 return self.pred_net(state).max(1)[1]
 
         # explore
         else:
             # select randomly from set of actions
             return torch.tensor(
-                [random.randrange(num_actions)], dtype=torch.long, device=self.params["device"]
+                [random.randrange(num_actions)], dtype=torch.long, device=self.device
             )
 
     def shape_reward(self, reward: int, action: int, done: bool) -> int:
@@ -227,22 +238,44 @@ class Trainer:
         """
 
         # missed shot
-        if action == 2 and reward < 0:
-            reward = -0.1
 
-        # terminal state
-        elif done:
-            reward = 0
+        if self.game == "defend":
+            if action == 2 and reward < 0:
+                reward = -0.1
 
-        # movement is small negative
-        elif reward < 0:
-            reward = -0.01
+            # terminal state
+            elif done:
+                reward = 0
 
-        # shot hit
-        elif reward > 0:
-            reward = 1.0
+            # movement is small negative
+            elif reward < 0:
+                reward = -0.01
+
+            # shot hit
+            elif reward > 0:
+                reward = 1.0
+
+        elif self.game == "health":
+            reward = reward
 
         return reward
+
+    def end_condition(self, reward: int) -> bool:
+        """
+        Determine end condition of game (shooting monster, dying).
+
+        Parameters
+        ----------
+        reward : int
+            Reward receieved.
+
+        """
+
+        if self.game == "health":
+            return reward < 0
+
+        elif self.game == "defend":
+            return reward > 0
 
     def train_dqn(self):
         """
@@ -257,7 +290,7 @@ class Trainer:
         self.learning_steps += 1
 
         # sample batch from replay memory
-        batch = self.replay_memory.sample(self.params["batch_size"])
+        batch = self.replay_memory.sample(self.params.batch_size)
 
         # extract new states
         new_states = [x[2] for x in batch]
@@ -265,23 +298,21 @@ class Trainer:
         # can't transition to None (termination)
         non_terminating_filter = torch.tensor(
             tuple(map(lambda s: s is not None, new_states)),
-            device=self.params["device"],
+            device=self.device,
         )
-        non_terminating = torch.stack([s for s in new_states if s is not None]).to(
-            self.params["device"]
-        )
+        non_terminating = torch.stack([s for s in new_states if s is not None]).to(self.device)
 
         # extract states, actions and rewards
-        states = torch.stack([x[0] for x in batch]).to(self.params["device"])
-        actions = torch.stack([x[1] for x in batch]).to(self.params["device"])
-        rewards = torch.stack([x[3] for x in batch]).to(self.params["device"])
+        states = torch.stack([x[0] for x in batch]).to(self.device)
+        actions = torch.stack([x[1] for x in batch]).to(self.device)
+        rewards = torch.stack([x[3] for x in batch]).to(self.device)
 
         # network predictions
         predicted = self.pred_net(states)
         action_val = predicted.gather(1, actions)
 
         # init 0 for terminal transitions
-        target_vals = torch.zeros(self.params["batch_size"], device=self.params["device"])
+        target_vals = torch.zeros(self.params.batch_size, device=self.device)
 
         # calculate maximum action for new states
         target_vals[non_terminating_filter] = (
@@ -291,7 +322,7 @@ class Trainer:
         target_vals = target_vals.unsqueeze(1)
 
         # target for TD error
-        target_update = (self.params["gamma"] * target_vals) + rewards
+        target_update = (self.params.gamma * target_vals) + rewards
 
         # huber loss for TD error
         huber_loss = F.smooth_l1_loss(action_val, target_update)
@@ -315,7 +346,7 @@ class Trainer:
         self.target_net.eval()
 
         # tqdm is a cool thing
-        pbar = tqdm(range(self.episode, self.params["episodes"]), unit="episodes")
+        pbar = tqdm(range(self.episode, self.params.episodes), unit="episodes")
         for episode in pbar:
             # tracking number of steps
             pbar.set_description(
@@ -332,7 +363,7 @@ class Trainer:
             skipped_rewards = 0
 
             # first action selected randomly
-            action = torch.tensor([self.env.action_space.sample()], device=self.params["device"])
+            action = torch.tensor([self.env.action_space.sample()], device=self.device)
 
             self.reset_stack()
 
@@ -351,16 +382,14 @@ class Trainer:
                 episode_steps += 1
 
                 # only want to stack every four frames
-                if num_skipped == self.params["skip_frames"] or reward > 0 or done:
+                if num_skipped == self.params.skip_frames or reward < 0 or done:
 
                     # reset counter
                     num_skipped = 0
 
                     # get old stack, and update stack with current observation
                     if len(self.frame_stack) > 0:
-                        old_stack = torch.cat(tuple(self.frame_stack), axis=0).to(
-                            self.params["device"]
-                        )
+                        old_stack = torch.cat(tuple(self.frame_stack), axis=0).to(self.device)
                         curr_size, _, _ = old_stack.shape
 
                     else:
@@ -370,20 +399,18 @@ class Trainer:
 
                     # frame stack
                     if not done:
-                        updated_stack = torch.cat(tuple(self.frame_stack), axis=0).to(
-                            self.params["device"]
-                        )
+                        updated_stack = torch.cat(tuple(self.frame_stack), axis=0).to(self.device)
                     else:
                         # when we've reached a terminal state
                         updated_stack = None
 
                     # need two stacks for transition
-                    if curr_size == self.params["stack_size"]:
+                    if curr_size == self.params.stack_size:
                         self.replay_memory.add_memory(
                             old_stack,
                             action,
                             updated_stack,
-                            torch.tensor([skipped_rewards], device=self.params["device"]),
+                            torch.tensor([skipped_rewards], device=self.device),
                         )
 
                     skipped_rewards = 0
@@ -391,7 +418,7 @@ class Trainer:
                     # if we can select action using frame stack
                     if len(self.frame_stack) == 4:
                         action = self.select_action(
-                            torch.cat(tuple(self.frame_stack), axis=0).to(self.params["device"]),
+                            torch.cat(tuple(self.frame_stack), axis=0).to(self.device),
                             self.num_actions,
                         )
                         self.steps += 1
@@ -406,7 +433,7 @@ class Trainer:
                     # full parameter saving (expensive)
                     if self.learning_steps > 0 and self.learning_steps % 10000 == 0:
 
-                        torch.save(self.pred_net.state_dict(), "model.pk")
+                        torch.save(self.pred_net.state_dict(), self.load_path + "model.pk")
 
                         # save full model in case of restart
                         torch.save(
@@ -422,7 +449,7 @@ class Trainer:
                                 "frame_stack": self.frame_stack,
                                 "epsilon": self.epsilon,
                             },
-                            "full_model.pk",
+                            self.load_path + "full_model.pk",
                         )
 
                 else:
@@ -438,13 +465,14 @@ class Trainer:
         policy defined by the DQN.
         """
 
+        # load pretrainedm model
         self.pred_net.load_state_dict(
-            torch.load("model.pk", map_location=torch.device(self.params["device"]))
+            torch.load(self.load_path + "model.pk", map_location=torch.device(self.device))
         )
         self.pred_net.eval()
 
         steps = 0
-        for episode in tqdm(range(self.params["episodes"]), desc="episodes", unit="episodes"):
+        for episode in tqdm(range(self.params.episodes), desc="episodes", unit="episodes"):
 
             episode_sum = 0
             episode_steps = 0
@@ -463,7 +491,7 @@ class Trainer:
                 observation, reward, done, _ = self.env.step(action)
 
                 # only want to stack every four frames
-                if num_skipped == self.params["skip_frames"] - 1:
+                if num_skipped == self.params.skip_frames - 1:
 
                     # reset counter
                     num_skipped = 0
