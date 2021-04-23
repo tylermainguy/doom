@@ -37,6 +37,13 @@ You can download pretrained models here:
 
 Here are a few videos documenting the trained agent in different available environments:
 
+**Defend the Line**
+
 https://user-images.githubusercontent.com/29045168/115936978-b0831e80-a464-11eb-8105-1cc24441444e.mp4
+
+**Defend the Center**
+
+https://user-images.githubusercontent.com/29045168/115937832-df01f900-a466-11eb-8a9f-725ffb67c6b0.mp4
+
 
 
